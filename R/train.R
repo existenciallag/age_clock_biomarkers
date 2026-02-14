@@ -13,11 +13,8 @@
 #   $fit   — Model fit object (coefficients, parameters)
 ###############################################################################
 
-source_if_needed <- function(f) {
-  fp <- file.path("R", f)
-  if (!exists("BIOMARKERS_PHENO_ORIG", envir = .GlobalEnv)) source(fp)
-}
-source_if_needed("config.R")
+# NOTE: This module requires R/config.R to be sourced first.
+# Use run_pipeline.R to orchestrate all modules in the correct order.
 
 # ── Core training function ─────────────────────────────────────────────────
 
