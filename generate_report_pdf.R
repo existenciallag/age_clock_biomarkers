@@ -480,14 +480,17 @@ for (start in seq(1, length(eq_lines), by = 30)) {
 write_section_header(4, "Quality Control",
                      "QC diagnostics for all trained clocks")
 
-if (!is.null(bundle$qc)) {
-  write_table_page(bundle$qc, title = "QC Summary Table",
-                   subtitle = "n_finite > 2000 and sd > 0 required for valid clock")
+qc_data <- NULL
+if (!is.null(pipeline_results$qc) && is.data.frame(pipeline_results$qc)) {
+  qc_data <- pipeline_results$qc
+} else if (!is.null(bundle$qc) && is.data.frame(bundle$qc)) {
+  qc_data <- bundle$qc
 }
-
-if (!is.null(pipeline_results$qc)) {
-  write_table_page(pipeline_results$qc, title = "QC Summary Table",
+if (!is.null(qc_data) && nrow(qc_data) > 0) {
+  write_table_page(qc_data, title = "QC Summary Table",
                    subtitle = "n_finite > 2000 and sd > 0 required for valid clock")
+} else {
+  write_text_page("QC Summary", c("No QC data available."))
 }
 
 # ---- SECTION 5: Population Statistics ----
@@ -514,14 +517,63 @@ if (!is.null(bundle$resid_coefs)) {
 write_section_header(7, "Survival Analysis: Hazard Ratios",
                      "Cox PH models — HR per +1 SD of biological age")
 
+# Ensure survival module functions are available
+source(file.path(REPORT_ROOT, "R", "survival.R"), local = FALSE)
+source(file.path(REPORT_ROOT, "R", "assemble.R"), local = FALSE)
+source(file.path(REPORT_ROOT, "R", "residualize.R"), local = FALSE)
+
+# Try multiple sources for HR data, from stored to recomputed
 hr_data <- NULL
-if (!is.null(bundle$hr_results)) {
-  hr_data <- bundle$hr_results
-} else if (!is.null(pipeline_results$hr)) {
-  hr_data <- pipeline_results$hr
+
+# Source 1: bundle$hr_results
+tryCatch({
+  tmp <- bundle$hr_results
+  if (!is.null(tmp) && is.data.frame(tmp) && nrow(tmp) > 0) {
+    hr_data <- tmp
+    message(">> HR source: bundle$hr_results (", nrow(hr_data), " rows)")
+  }
+}, error = function(e) NULL)
+
+# Source 2: pipeline_results$hr
+if (is.null(hr_data)) {
+  tryCatch({
+    tmp <- pipeline_results$hr
+    if (!is.null(tmp) && is.data.frame(tmp) && nrow(tmp) > 0) {
+      hr_data <- tmp
+      message(">> HR source: pipeline_results$hr (", nrow(hr_data), " rows)")
+    }
+  }, error = function(e) NULL)
 }
 
-if (!is.null(hr_data) && nrow(hr_data) > 0) {
+# Source 3: Recompute directly from the data (most reliable)
+if (is.null(hr_data) && !is.null(pipeline_results$data)) {
+  d <- pipeline_results$data
+  has_mort <- all(c("time", "status") %in% names(d)) &&
+    any(!is.na(d$status) & d$status == 1)
+  if (has_mort) {
+    message(">> HR: recomputing from pipeline data...")
+    tryCatch({
+      ba_cols_r  <- list_ba_columns(d)
+      adv_cols_r <- list_advance_columns(d)
+
+      # Use advancement columns that have _resid_z variants
+      rz_available <- grep("_resid_z$", names(d), value = TRUE)
+      valid_r <- sub("_resid_z$", "", rz_available)
+
+      hr_raw_r <- cox_raw(d, ba_cols_r, adjust_gender = FALSE)
+      hr_res_r <- cox_residual(d, valid_r, adjust_gender = FALSE)
+      hr_data  <- rbind(hr_raw_r, hr_res_r)
+
+      if (!is.null(hr_data) && nrow(hr_data) > 0) {
+        message(">> Recomputed ", nrow(hr_data), " HR models successfully")
+      }
+    }, error = function(e) {
+      message("  ! HR recompute failed: ", e$message)
+    })
+  }
+}
+
+if (!is.null(hr_data) && is.data.frame(hr_data) && nrow(hr_data) > 0) {
   write_table_page(hr_data,
                    title = "Hazard Ratio Table (All Models)",
                    subtitle = "HR > 1 = higher mortality per +1 SD of biological age")
@@ -529,7 +581,6 @@ if (!is.null(hr_data) && nrow(hr_data) > 0) {
   # Forest plot
   tryCatch({
     library(ggplot2)
-    source(file.path(REPORT_ROOT, "R", "survival.R"), local = FALSE)
     p <- forest_plot(hr_data,
                      title = "Hazard Ratios: All Biological Age Clocks",
                      subtitle = "Per +1 SD (adjusted for chronological age)")
