@@ -137,14 +137,25 @@ write_table_page <- function(df, title, subtitle = NULL, cex_text = 0.65,
       mtext(subtitle, side = 3, line = 0, cex = 0.8, col = "gray40", font = 3)
     }
 
-    # Format numeric columns
+    # Format all columns to character safely
     for (j in seq_len(ncol(chunk))) {
-      if (is.numeric(chunk[[j]])) {
+      col <- chunk[[j]]
+      if (is.list(col)) {
+        # Flatten list columns to character
+        chunk[[j]] <- vapply(col, function(x) {
+          if (is.null(x)) "NULL"
+          else if (is.numeric(x) && length(x) == 1) formatC(x, format = "g", digits = 4)
+          else paste(as.character(x), collapse = ",")
+        }, character(1))
+      } else if (is.numeric(col)) {
         chunk[[j]] <- ifelse(
-          abs(chunk[[j]]) < 0.001 & chunk[[j]] != 0,
-          formatC(chunk[[j]], format = "e", digits = 3),
-          formatC(chunk[[j]], format = "f", digits = 4)
+          is.na(col), "NA",
+          ifelse(abs(col) < 0.001 & col != 0,
+                 formatC(col, format = "e", digits = 3),
+                 formatC(col, format = "f", digits = 4))
         )
+      } else {
+        chunk[[j]] <- as.character(col)
       }
     }
 
@@ -210,49 +221,91 @@ bundle <- pipeline_results$bundle
 extract_model_betas <- function(fit, clock_name) {
   if (is.null(fit)) return(NULL)
 
-  # BioAge stores coefficients in different places depending on model type
-  coefs <- NULL
+  # Recursively collect all named numeric scalars from a fit object.
+  # BioAge stores fits as nested lists — we walk the entire structure
+  # and pull out every named numeric value as a "beta".
+  collect_numeric <- function(obj, prefix = "") {
+    rows <- list()
 
-  # Try $coefficients directly
-  if (!is.null(fit$coefficients)) {
-    coefs <- fit$coefficients
-  }
-  # Try $coef
-  if (is.null(coefs) && !is.null(fit$coef)) {
-    coefs <- fit$coef
-  }
-  # Try inside a glm/lm summary structure
-  if (is.null(coefs) && !is.null(fit$results) && !is.null(fit$results$coefficients)) {
-    coefs <- fit$results$coefficients
-  }
-  # Try survreg-style
-  if (is.null(coefs) && is.list(fit)) {
-    # Walk the list looking for a named numeric vector
-    for (nm in names(fit)) {
-      obj <- fit[[nm]]
-      if (is.numeric(obj) && !is.null(names(obj)) && length(obj) > 1) {
-        coefs <- obj
-        break
+    if (is.null(obj)) return(rows)
+
+    # Case 1: simple named numeric vector (the ideal case)
+    if (is.numeric(obj) && !is.null(names(obj)) && !is.matrix(obj)) {
+      for (i in seq_along(obj)) {
+        nm <- if (nzchar(prefix)) paste0(prefix, ".", names(obj)[i]) else names(obj)[i]
+        rows[[length(rows) + 1]] <- data.frame(
+          clock = clock_name, variable = nm,
+          beta = obj[i], stringsAsFactors = FALSE, row.names = NULL
+        )
       }
+      return(rows)
     }
+
+    # Case 2: unnamed single numeric
+    if (is.numeric(obj) && length(obj) == 1 && is.null(names(obj)) && nzchar(prefix)) {
+      rows[[1]] <- data.frame(
+        clock = clock_name, variable = prefix,
+        beta = obj, stringsAsFactors = FALSE, row.names = NULL
+      )
+      return(rows)
+    }
+
+    # Case 3: matrix or data.frame — extract first column or "coef" column
+    if (is.matrix(obj) || is.data.frame(obj)) {
+      if ("coef" %in% colnames(obj)) {
+        vals <- as.numeric(obj[, "coef"])
+      } else if ("Estimate" %in% colnames(obj)) {
+        vals <- as.numeric(obj[, "Estimate"])
+      } else if ("exp(coef)" %in% colnames(obj)) {
+        vals <- as.numeric(obj[, 1])
+      } else {
+        vals <- as.numeric(obj[, 1])
+      }
+      nms <- rownames(obj)
+      if (is.null(nms)) nms <- paste0("V", seq_along(vals))
+      for (i in seq_along(vals)) {
+        lab <- if (nzchar(prefix)) paste0(prefix, ".", nms[i]) else nms[i]
+        rows[[length(rows) + 1]] <- data.frame(
+          clock = clock_name, variable = lab,
+          beta = vals[i], stringsAsFactors = FALSE, row.names = NULL
+        )
+      }
+      return(rows)
+    }
+
+    # Case 4: named list — recurse into each element
+    if (is.list(obj) && !is.null(names(obj))) {
+      for (nm in names(obj)) {
+        child_prefix <- if (nzchar(prefix)) paste0(prefix, ".", nm) else nm
+        child <- obj[[nm]]
+        # Skip large data.frames (training data), functions, formulas
+        if (is.data.frame(child) && nrow(child) > 50) next
+        if (is.function(child)) next
+        if (inherits(child, "formula")) next
+        if (inherits(child, "call")) next
+        rows <- c(rows, collect_numeric(child, child_prefix))
+      }
+      return(rows)
+    }
+
+    rows
   }
 
-  if (is.null(coefs)) {
+  all_rows <- collect_numeric(fit)
+
+  if (length(all_rows) == 0) {
+    # Last resort: dump the structure names
     return(data.frame(
-      clock       = clock_name,
-      variable    = "(no coefficients found)",
-      beta        = NA_real_,
+      clock    = clock_name,
+      variable = paste("(fit structure:", paste(names(fit), collapse = ", "), ")"),
+      beta     = NA_real_,
       stringsAsFactors = FALSE
     ))
   }
 
-  data.frame(
-    clock    = clock_name,
-    variable = names(coefs),
-    beta     = as.numeric(coefs),
-    stringsAsFactors = FALSE,
-    row.names = NULL
-  )
+  out <- do.call(rbind, all_rows)
+  rownames(out) <- NULL
+  out
 }
 
 # Extract from all models
