@@ -1,7 +1,0 @@
-hepatic_enzime_insulin = c("alp","ggt","insulin"),
-hepatic_lipid = c("trig","totchol"),
-hema_integrated = c("rdw","mcv","rbc","wbc","lymph"),
-micronutrient_methylation = c("vitaminB12","hba1c","rdw"),
-renal_A = c("lncreat_umol","bun"),
-
-
