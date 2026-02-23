@@ -36,26 +36,50 @@ assemble_data <- function(clocks) {
   # --- Start from PhenoAge original (guaranteed to exist) ------------------
   base <- clocks$pheno_orig$data
 
-  # Auto-detect mortality / follow-up columns
-  mort_col <- detect_column(base, MORT_STATUS_PATTERNS, "mortality status")
-  time_col <- detect_column(base, MORT_TIME_PATTERNS,   "follow-up time")
+  # BioAge NHANES IV data already has: time, status, age, gender, race,
+  # health, adl, lnwalk, grip_scaled, edu, annual_income, poverty_ratio,
+  # plus all raw biomarkers and pre-computed kdm0/phenoage0/etc.
+  # Keep ALL useful columns instead of just a few.
 
-  # Core columns always present
-  keep <- c("sampleID", "age", "gender")
-  if (!is.na(mort_col)) keep <- c(keep, mort_col)
-  if (!is.na(time_col)) keep <- c(keep, time_col)
+  # Demographics + mortality (BioAge already renames mortstat->status, permth_exm->time)
+  keep_core <- c("sampleID", "age", "gender", "race",
+                 "time", "status",
+                 "bmi", "sbp", "dbp")
+
+  # Health outcomes (for table_health validation)
+  keep_health <- c("health", "adl", "lnwalk", "grip_scaled")
+
+  # SES (for table_ses validation)
+  keep_ses <- c("edu", "annual_income", "poverty_ratio")
+
+  # Pre-computed original BioAge clocks (from package data-raw)
+  keep_orig <- c("kdm0", "kdm_advance0", "phenoage0", "phenoage_advance0")
+
+  # Combine all columns to keep
+  keep <- c(keep_core, keep_health, keep_ses, keep_orig)
   keep <- intersect(keep, names(base))
 
-  data <- base[, c(keep, "phenoage", "phenoage_advance"), drop = FALSE]
+  # Also include the trained phenoage columns
+  keep <- unique(c(keep, "phenoage", "phenoage_advance"))
+  keep <- intersect(keep, names(base))
+
+  data <- base[, keep, drop = FALSE]
+
+  # Rename trained PhenoAge columns to distinguish from pre-computed originals
   names(data)[names(data) == "phenoage"]         <- "phenoage_orig"
   names(data)[names(data) == "phenoage_advance"] <- "phenoage_orig_advance"
 
-  # Standardise mortality column names for downstream code
-  if (!is.na(mort_col) && mort_col != "status") {
-    data$status <- data[[mort_col]]
-  }
-  if (!is.na(time_col) && time_col != "time") {
-    data$time <- data[[time_col]]
+  # Verify mortality columns
+  if ("status" %in% names(data) && "time" %in% names(data)) {
+    n_deaths <- sum(data$status == 1, na.rm = TRUE)
+    message(">> Mortality data: ", n_deaths, " deaths, ",
+            sum(!is.na(data$status)), " total subjects")
+  } else {
+    # Fallback: try to detect with patterns
+    mort_col <- detect_column(base, MORT_STATUS_PATTERNS, "mortality status")
+    time_col <- detect_column(base, MORT_TIME_PATTERNS,   "follow-up time")
+    if (!is.na(mort_col) && mort_col != "status") data$status <- base[[mort_col]]
+    if (!is.na(time_col) && time_col != "time")   data$time   <- base[[time_col]]
   }
 
   # --- PhenoAge global -----------------------------------------------------

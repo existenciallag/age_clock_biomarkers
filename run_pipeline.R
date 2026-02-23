@@ -186,15 +186,108 @@ data <- add_zscores(data, ba_cols)
 data <- add_residuals(data, valid)
 
 # ======================================================================
-# STEP 5. SURVIVAL ANALYSIS
+# STEP 5. BIOAGE OFFICIAL VALIDATION (table_surv + table_health)
 # ======================================================================
 
 message("\n", strrep("=", 60))
-message("STEP 5: Survival analysis (Cox proportional hazards)")
+message("STEP 5: BioAge validation (table_surv, table_health)")
 message(strrep("=", 60))
 
+# BioAge's table_surv / table_health / plot_ba need a merged dataset
+# following BioAge conventions: merge hd$data + kdm$data + phenoage$data
+bioage_data <- tryCatch({
+  tmp <- clocks$pheno_orig$data
+  if (!is.null(clocks$kdm))
+    tmp <- merge(tmp, clocks$kdm$data[, c("sampleID", "kdm", "kdm_advance")],
+                 by = "sampleID", all.x = TRUE)
+  if (!is.null(clocks$hd))
+    tmp <- merge(tmp, clocks$hd$data[, c("sampleID", "hd", "hd_log")],
+                 by = "sampleID", all.x = TRUE)
+  tmp
+}, error = function(e) {
+  message("  ! Could not build BioAge merged data: ", e$message)
+  NULL
+})
+
+# Standard BioAge agevar vector (as in the package vignette)
+agevar_std <- c("kdm_advance0", "phenoage_advance0",
+                "kdm_advance",  "phenoage_advance",
+                "hd",           "hd_log")
+label_std  <- c("KDM (original)", "PhenoAge (original)",
+                "KDM (trained)",  "PhenoAge (trained)",
+                "HD",             "HD (log)")
+
+# Keep only those that exist in the data
+if (!is.null(bioage_data)) {
+  avail <- agevar_std %in% names(bioage_data)
+  agevar_use <- agevar_std[avail]
+  label_use  <- label_std[avail]
+}
+
+# 5a. BioAge::table_surv — official mortality table
+has_mortality <- !is.null(bioage_data) &&
+  all(c("time", "status") %in% names(bioage_data)) &&
+  any(bioage_data$status == 1, na.rm = TRUE)
+
+if (has_mortality && length(agevar_use) > 0) {
+  message(">> Running BioAge::table_surv() — official mortality associations")
+  message(">> Deaths: ", sum(bioage_data$status == 1, na.rm = TRUE),
+          " / ", sum(!is.na(bioage_data$status)), " subjects")
+  tryCatch({
+    surv_table <- BioAge::table_surv(bioage_data, agevar_use, label_use)
+    print(surv_table)
+    message(">> table_surv complete")
+  }, error = function(e) {
+    message("  ! table_surv failed: ", e$message)
+  })
+} else {
+  message(">> Skipping table_surv (no mortality data or no valid age vars)")
+  message("   Columns present: ", paste(names(bioage_data)[1:20], collapse = ", "), " ...")
+  message("   'time' present: ", "time" %in% names(bioage_data))
+  message("   'status' present: ", "status" %in% names(bioage_data))
+  if ("status" %in% names(bioage_data))
+    message("   status values: ", paste(table(bioage_data$status), collapse = " / "))
+}
+
+# 5b. BioAge::table_health — health outcome associations
+health_available <- intersect(HEALTH_OUTCOMES, names(bioage_data))
+if (!is.null(bioage_data) && length(health_available) > 0 && length(agevar_use) > 0) {
+  message("\n>> Running BioAge::table_health() — health outcome associations")
+  message(">> Health outcomes: ", paste(health_available, collapse = ", "))
+  tryCatch({
+    health_table <- BioAge::table_health(bioage_data, agevar_use,
+                                          health_available, label_use)
+    print(health_table$table)
+    message(">> table_health complete")
+  }, error = function(e) {
+    message("  ! table_health failed: ", e$message)
+  })
+} else {
+  message(">> No health outcomes available for table_health")
+}
+
+# 5c. BioAge::plot_ba — BA vs chronological age scatter
+if (!is.null(bioage_data) && length(agevar_use) > 0) {
+  message("\n>> BioAge::plot_ba() — BA vs age scatter")
+  tryCatch({
+    BioAge::plot_ba(bioage_data, agevar_use, label_use)
+    message(">> plot_ba displayed in viewer")
+  }, error = function(e) {
+    message("  ! plot_ba failed: ", e$message)
+  })
+}
+
+# ======================================================================
+# STEP 6. CUSTOM SURVIVAL ANALYSIS (our Cox models)
+# ======================================================================
+
+message("\n", strrep("=", 60))
+message("STEP 6: Custom survival analysis (Cox proportional hazards)")
+message(strrep("=", 60))
+
+# Re-check mortality on the assembled data
 has_mortality <- all(c("time", "status") %in% names(data)) &&
-  !all(is.na(data$status))
+  any(data$status == 1, na.rm = TRUE)
 
 hr_all <- NULL
 
@@ -225,7 +318,7 @@ if (has_mortality) {
   # Combined table
   hr_all <- hr_table(data, valid, adjust_gender = FALSE)
 
-  # Forest plot
+  # Forest plot (displayed in viewer)
   if (!is.null(hr_resid) && nrow(hr_resid) > 0) {
     p_forest <- forest_plot(
       hr_resid,
@@ -238,15 +331,20 @@ if (has_mortality) {
 
 } else {
   message(">> No mortality data detected - skipping survival analysis")
-  message("   (This is expected for clinical deployment datasets)")
+  message("   Debug: 'time' in names = ", "time" %in% names(data))
+  message("   Debug: 'status' in names = ", "status" %in% names(data))
+  if ("status" %in% names(data)) {
+    message("   Debug: table(status) = ", paste(names(table(data$status)),
+            table(data$status), sep = ":", collapse = " / "))
+  }
 }
 
 # ======================================================================
-# STEP 6. CORRELATION & INDEPENDENCE ANALYSIS
+# STEP 7. CORRELATION & INDEPENDENCE ANALYSIS
 # ======================================================================
 
 message("\n", strrep("=", 60))
-message("STEP 6: Correlation and independence analysis")
+message("STEP 7: Correlation and independence analysis")
 message(strrep("=", 60))
 
 # BA vs chronological age
@@ -293,11 +391,11 @@ disc <- discordance_analysis(data)
 if (!is.null(disc)) print(disc, row.names = FALSE)
 
 # ======================================================================
-# STEP 7. RISK STRATIFICATION
+# STEP 8. RISK STRATIFICATION
 # ======================================================================
 
 message("\n", strrep("=", 60))
-message("STEP 7: Risk stratification")
+message("STEP 8: Risk stratification")
 message(strrep("=", 60))
 
 if (has_mortality) {
@@ -335,11 +433,11 @@ if (has_mortality) {
 }
 
 # ======================================================================
-# STEP 8. EXPORT DEPLOYMENT BUNDLE
+# STEP 9. EXPORT DEPLOYMENT BUNDLE
 # ======================================================================
 
 message("\n", strrep("=", 60))
-message("STEP 8: Exporting deployment bundle for clinical use")
+message("STEP 9: Exporting deployment bundle for clinical use")
 message(strrep("=", 60))
 
 bundle <- build_deployment_bundle(
@@ -372,12 +470,13 @@ cat("==========================================================\n")
 
 # Store everything in a single list for interactive use
 pipeline_results <- list(
-  data    = data,
-  clocks  = clocks,
-  qc      = qc,
-  valid   = valid,
-  hr      = hr_all,
-  bundle  = bundle
+  data        = data,
+  clocks      = clocks,
+  qc          = qc,
+  valid       = valid,
+  hr          = hr_all,
+  bundle      = bundle,
+  bioage_data = if (exists("bioage_data")) bioage_data else NULL
 )
 
 message("\n>> All results stored in 'pipeline_results'")
