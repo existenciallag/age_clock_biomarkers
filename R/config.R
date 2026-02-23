@@ -69,12 +69,20 @@ COX_MIN_N <- 200
 
 # ── 5. Mortality column detection ─────────────────────────────────────────
 #' Patterns used to auto-detect mortality status and follow-up columns.
+#' BioAge already renames mortstat -> status, permth_exm -> time.
 #' Checked in order; first match wins.
 
-MORT_STATUS_PATTERNS <- c("mortstat", "dies", "dead", "outcome")
-MORT_TIME_PATTERNS   <- c("permth_int", "statsurv", "followup", "surv")
+MORT_STATUS_PATTERNS <- c("^status$", "mortstat", "dies", "dead", "outcome")
+MORT_TIME_PATTERNS   <- c("^time$", "permth_exm", "permth_int", "followup", "surv")
 
-# ── 6. Palette defaults ───────────────────────────────────────────────────
+# ── 6. Health outcome columns (from BioAge NHANES IV) ───────────────────
+#' These are used by BioAge::table_health() and our health correlation step.
+HEALTH_OUTCOMES <- c("health", "adl", "lnwalk", "grip_scaled")
+
+#' SES variables for BioAge::table_ses()
+SES_VARS <- c("edu", "annual_income", "poverty_ratio")
+
+# ── 7. Palette defaults ───────────────────────────────────────────────────
 HEATMAP_PALETTE <- c("blue", "white", "red")
 FOREST_COLOUR   <- "steelblue"
 KM_COLOURS      <- c("darkgreen", "gray40", "darkred")
