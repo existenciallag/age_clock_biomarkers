@@ -40,7 +40,11 @@ PANELS_SUB <- list(
   hepatic_lipid             = c("trig", "totchol"),
   hema_integrated           = c("rdw", "mcv", "rbc", "wbc", "lymph"),
   micronutrient_methylation = c("vitaminB12", "hba1c", "rdw"),
-  renal_A                   = c("lncreat_umol", "bun")
+  renal_A                   = c("lncreat_umol", "bun"),
+  # Full PhenoAge panel minus SBP — for cohorts lacking blood pressure data
+  full_no_sbp               = c("albumin_gL", "alp", "lncrp", "totchol",
+                                 "lncreat_umol", "hba1c", "bun",
+                                 "uap", "lymph", "mcv", "wbc")
 )
 
 # ── 3. System-level grouping ───────────────────────────────────────────────
@@ -52,7 +56,8 @@ PANEL_SYSTEM <- c(
   hepatic_lipid             = "Hepatic",
   hema_integrated           = "Hematologic",
   micronutrient_methylation = "Micronutrient / Methylation",
-  renal_A                   = "Renal"
+  renal_A                   = "Renal",
+  full_no_sbp               = "Global (no SBP)"
 )
 
 # ── 4. QC thresholds ──────────────────────────────────────────────────────
