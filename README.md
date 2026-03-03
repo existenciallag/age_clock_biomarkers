@@ -79,6 +79,9 @@ age_clock_biomarkers/
 | `hema_integrated` | Hematologic | RDW, MCV, RBC, WBC, lymphocytes |
 | `micronutrient_methylation` | Micronutrient | vitamin B12, HbA1c, RDW |
 | `renal_A` | Renal | creatinine (log), BUN |
+| `full_no_sbp` | Global (no SBP) | albumin, ALP, log(CRP), total cholesterol, log(creatinine), HbA1c, BUN, uric acid, lymphocytes, MCV, WBC |
+
+**Note:** `full_no_sbp` is PhenoAge with 11/12 original biomarkers (no systolic blood pressure). Use this as the primary clock when blood pressure data is unavailable.
 
 ## Module Reference
 
