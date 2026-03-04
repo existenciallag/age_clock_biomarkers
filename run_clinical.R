@@ -441,6 +441,14 @@ p_age <- ggplot(results, aes(x = age)) +
 print(p_age)
 
 # ── Plot 4: Advancement by age decade ──
+# Recompute valid_adv in case earlier block was skipped
+if (!exists("valid_adv")) {
+  valid_adv <- character(0)
+  if (length(adv_cols) > 0) {
+    has_data <- vapply(adv_cols, function(x) sum(!is.na(results[[x]])) > 30, logical(1))
+    valid_adv <- adv_cols[has_data]
+  }
+}
 if (length(valid_adv) > 0) {
   results$age_decade <- cut(results$age,
     breaks = c(0, 30, 40, 50, 60, 70, 80, 120),
