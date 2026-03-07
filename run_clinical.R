@@ -56,10 +56,10 @@ message(">> Clocks: ", paste(bundle$meta$clocks_trained, collapse = ", "))
 
 message("\n>> Loading preclinical cohort data...")
 
-f1 <- file.path(PROJECT_ROOT, "master_PARTE1.csv")
-f2 <- file.path(PROJECT_ROOT, "master_PARTE2.csv")
+f1 <- file.path(PROJECT_ROOT, "phenoage_master_PARTE1.csv")
+f2 <- file.path(PROJECT_ROOT, "phenoage_master_PARTE2.csv")
 
-if (!file.exists(f1)) stop("master_PARTE1.csv not found")
+if (!file.exists(f1)) stop("phenoage_master_PARTE1.csv not found")
 
 parte1 <- read.csv(f1, stringsAsFactors = FALSE)
 message(">> PARTE 1: ", nrow(parte1), " rows")
@@ -90,60 +90,64 @@ df <- cohort %>%
     # Age — filter invalid values (some may be year values like 2025)
     age = as.numeric(age),
 
-    # Albumin (g/dL) — NHANES uses g/dL directly
+    # ── Levine 2018 PhenoAge: 9 biomarkers ──
+
+    # 1. Albumin (g/dL) — direct
     albumin = as.numeric(albumin),
 
-    # ALP (U/L) — direct
-    alp = as.numeric(ALP),
+    # 2. ALP (U/L) — direct (lowercase in new data)
+    alp = as.numeric(alp),
 
-    # Glucose — NOT AVAILABLE in this dataset
-    # glucose = NA_real_,
+    # 3. Glucose (mg/dL) — NOW AVAILABLE
+    glucose = as.numeric(glucose),
 
-    # CRP: raw mg/L → log(CRP)
-    crp   = as.numeric(CRP),
+    # 4. CRP: raw mg/L → log(CRP)
+    #    New data has both 'crp' and 'log_crp'; use raw and compute log
+    crp   = as.numeric(crp),
     lncrp = ifelse(is.na(crp) | crp <= 0, NA, log(crp)),
 
-    # Creatinine: mg/dL → log(creatinine mg/dL)
+    # 5. Creatinine: mg/dL → log(creatinine mg/dL)
     creat   = as.numeric(creatinine),
     lncreat = ifelse(is.na(creat) | creat <= 0, NA, log(creat)),
 
-    # Lymphocyte % — direct
-    lymph = as.numeric(lymphocytes),
+    # 6. Lymphocyte % — column is 'lymphocyte' (not 'lymphocytes')
+    lymph = as.numeric(lymphocyte),
 
-    # MCV (fL) — direct
-    mcv = as.numeric(MCV),
+    # 7. MCV (fL) — direct (lowercase in new data)
+    mcv = as.numeric(mcv),
 
-    # RDW (%) — direct (THIS IS ONE OF THE 9 PHENOAGE BIOMARKERS)
-    rdw = as.numeric(RDW),
+    # 8. RDW (%) — direct (lowercase in new data)
+    rdw = as.numeric(rdw),
 
-    # WBC: if in cells/uL (>300), convert to 1000 cells/uL
-    wbc = ifelse(as.numeric(WBC) > 300, as.numeric(WBC) / 1000, as.numeric(WBC)),
+    # 9. WBC: if in cells/uL (>300), convert to 1000 cells/uL
+    wbc = ifelse(as.numeric(wbc) > 300, as.numeric(wbc) / 1000, as.numeric(wbc)),
 
     # ── Additional biomarkers for sub-clocks ──
+
     # RBC: if in cells/uL (>100), convert to M/uL
-    rbc = as.numeric(RBC),
+    rbc = as.numeric(rbc),
     rbc = ifelse(rbc > 100, rbc / 1e6, rbc),
 
-    # GGT (U/L) — direct
-    ggt = as.numeric(GGT),
+    # GGT (U/L) — direct (lowercase in new data)
+    ggt = as.numeric(ggt),
 
-    # Insulin (uU/mL) — direct
+    # Insulin (uU/mL)
     insulin = as.numeric(insulin),
 
-    # Triglycerides (mg/dL) — direct
+    # Triglycerides (mg/dL)
     trig = as.numeric(triglycerides),
 
-    # Total cholesterol (mg/dL)
-    totchol = as.numeric(total_cholesterol),
+    # Total cholesterol (mg/dL) — column is 'cholesterol' in new data
+    totchol = as.numeric(cholesterol),
 
-    # HbA1c (%) — direct
-    hba1c = as.numeric(HbA1c),
+    # HbA1c (%)
+    hba1c = as.numeric(hba1c),
 
-    # Vitamin B12 (pg/mL) — direct
-    vitaminB12 = as.numeric(vitamin_B12),
+    # Vitamin B12 (pg/mL) — column is 'vitamin_b12' in new data
+    vitaminB12 = as.numeric(vitamin_b12),
 
-    # BUN (mg/dL) — direct
-    bun = as.numeric(BUN),
+    # BUN (mg/dL)
+    bun = as.numeric(bun),
 
     # Uric acid (mg/dL)
     uap = as.numeric(uric_acid),
@@ -242,11 +246,9 @@ message("\n", strrep("=", 60))
 message("STEP 1: Scoring all clocks")
 message(strrep("=", 60))
 
-# NOTE: Original Levine PhenoAge requires glucose, which is NOT in this dataset.
-# The published PhenoAge will return all NA.
-# The best PhenoAge approximation available: 'levine_no_glucose' sub-clock
-# (8 of 9 Levine biomarkers, trained on NHANES).
-# The best available clock with >80% coverage: 'hema_integrated'.
+# All 9 Levine 2018 PhenoAge biomarkers are now available (including glucose).
+# The published PhenoAge scoring will use hardcoded Levine 2018 coefficients.
+# Bundle-based sub-clocks also scored for organ-system breakdown.
 
 scored <- score_patients(
   patient_data = df,
@@ -546,11 +548,8 @@ if (!is.null(cor_table) && nrow(cor_table) > 0) {
   cat("  Best r(BA, age):  ", sprintf("%.4f", best$r), " (", best$clock, ")\n")
 }
 cat("\n  NOTES:\n")
-cat("  - Glucose is NOT available in this cohort.\n")
-cat("    Original Levine PhenoAge (9 biomarkers) cannot be computed.\n")
-cat("  - Best available clocks: hema_integrated (85% coverage),\n")
-cat("    levine_no_glucose (8/9 Levine biomarkers).\n")
-cat("  - SBP also missing: KDM and HD will show NA.\n")
+cat("  - All 9 Levine PhenoAge biomarkers available (incl. glucose).\n")
+cat("  - SBP missing: KDM and HD will show NA (expected).\n")
 cat("\n  IMPORTANT: If 0 clocks scored, re-run run_pipeline.R\n")
 cat("  to retrain with the corrected config.R biomarker panels.\n")
 cat("\n  Output files:\n")
