@@ -78,182 +78,209 @@ message(">> Combined cohort: ", nrow(cohort), " rows, ", ncol(cohort), " columns
 
 message("\n>> Transforming biomarkers to NHANES conventions...")
 
-# Your lab data -> NHANES variable names
-# PhenoAge original requires: albumin_gL, alp, lncrp, totchol,
-#   lncreat_umol, hba1c, sbp, bun, uap, lymph, mcv, wbc
+# Levine 2018 PhenoAge uses these 9 biomarkers (+ age):
+#   albumin (g/dL), alp (U/L), glucose (mg/dL), lncrp (log CRP),
+#   lncreat (log creatinine mg/dL), lymph (%), mcv (fL), rdw (%),
+#   wbc (1000 cells/uL)
 
 df <- cohort %>%
   mutate(
     patient_id = Protocolo,
 
-    # albumin: your data is in g/dL, NHANES uses g/L (multiply by 10)
-    # and also g/dL for some panels
-    albumin    = as.numeric(albumin),
-    albumin_gL = albumin * 10,
+    # Age — filter invalid values (some may be year values like 2025)
+    age = as.numeric(age),
 
-    # ALP: direct (U/L)
-    alp   = as.numeric(ALP),
-    lnalp = ifelse(is.na(alp) | alp <= 0, NA, log(alp)),
+    # Albumin (g/dL) — NHANES uses g/dL directly
+    albumin = as.numeric(albumin),
 
-    # CRP: your data is raw mg/L, NHANES uses log(CRP)
+    # ALP (U/L) — direct
+    alp = as.numeric(ALP),
+
+    # Glucose — NOT AVAILABLE in this dataset
+    # glucose = NA_real_,
+
+    # CRP: raw mg/L → log(CRP)
     crp   = as.numeric(CRP),
     lncrp = ifelse(is.na(crp) | crp <= 0, NA, log(crp)),
+
+    # Creatinine: mg/dL → log(creatinine mg/dL)
+    creat   = as.numeric(creatinine),
+    lncreat = ifelse(is.na(creat) | creat <= 0, NA, log(creat)),
+
+    # Lymphocyte % — direct
+    lymph = as.numeric(lymphocytes),
+
+    # MCV (fL) — direct
+    mcv = as.numeric(MCV),
+
+    # RDW (%) — direct (THIS IS ONE OF THE 9 PHENOAGE BIOMARKERS)
+    rdw = as.numeric(RDW),
+
+    # WBC: if in cells/uL (>300), convert to 1000 cells/uL
+    wbc = ifelse(as.numeric(WBC) > 300, as.numeric(WBC) / 1000, as.numeric(WBC)),
+
+    # ── Additional biomarkers for sub-clocks ──
+    # RBC: if in cells/uL (>100), convert to M/uL
+    rbc = as.numeric(RBC),
+    rbc = ifelse(rbc > 100, rbc / 1e6, rbc),
+
+    # GGT (U/L) — direct
+    ggt = as.numeric(GGT),
+
+    # Insulin (uU/mL) — direct
+    insulin = as.numeric(insulin),
+
+    # Triglycerides (mg/dL) — direct
+    trig = as.numeric(triglycerides),
 
     # Total cholesterol (mg/dL)
     totchol = as.numeric(total_cholesterol),
 
-    # Creatinine: your data is mg/dL, NHANES uses log(creat in umol/L)
-    # umol/L = mg/dL * 88.42
-    creat       = as.numeric(creatinine),
-    creat_umol  = creat * 88.42,
-    lncreat     = ifelse(is.na(creat) | creat <= 0, NA, log(creat)),
-    lncreat_umol = ifelse(is.na(creat_umol) | creat_umol <= 0, NA, log(creat_umol)),
+    # HbA1c (%) — direct
+    hba1c = as.numeric(HbA1c),
 
-    # HbA1c (%)
-    hba1c   = as.numeric(HbA1c),
-    lnhba1c = ifelse(is.na(hba1c) | hba1c <= 0, NA, log(hba1c)),
-
-    # SBP: not available in your data — will limit some clocks
-    sbp = NA_real_,
-
-    # BUN (mg/dL)
-    bun   = as.numeric(BUN),
-    lnbun = ifelse(is.na(bun) | bun <= 0, NA, log(bun)),
-
-    # Uric acid (mg/dL)
-    uap   = as.numeric(uric_acid),
-    lnuap = ifelse(is.na(uap) | uap <= 0, NA, log(uap)),
-
-    # Lymphocytes (%) - your data is already percentage
-    lymph = as.numeric(lymphocytes),
-
-    # MCV (fL) - direct
-    mcv = as.numeric(MCV),
-
-    # WBC (K/uL) - your data is absolute count, NHANES uses K/uL
-    # If your WBC is in cells/uL (e.g., 6850), divide by 1000
-    wbc = ifelse(as.numeric(WBC) > 300, as.numeric(WBC) / 1000, as.numeric(WBC)),
-
-    # ── Additional biomarkers for sub-clocks ──
-    ggt       = as.numeric(GGT),
-    insulin_raw = as.numeric(insulin),
-    # BioAge uses "insulin" but it's fasting insulin (uU/mL)
-    insulin   = as.numeric(insulin),
-
-    trig      = as.numeric(triglycerides),
-
-    rdw       = as.numeric(RDW),
-    rbc       = as.numeric(RBC),
-    # If RBC is in cells/uL (e.g., 5940000), convert to M/uL
-    rbc       = ifelse(rbc > 100, rbc / 1e6, rbc),
-
+    # Vitamin B12 (pg/mL) — direct
     vitaminB12 = as.numeric(vitamin_B12),
 
-    # Gender (NHANES: 1=male, 2=female)
-    gender = ifelse(sex == "M", 1, 2),
+    # BUN (mg/dL) — direct
+    bun = as.numeric(BUN),
 
-    # Age
-    age = as.numeric(age)
+    # Uric acid (mg/dL)
+    uap = as.numeric(uric_acid),
+
+    # Gender (NHANES: 1=male, 2=female)
+    gender = ifelse(sex == "M", 1, 2)
   )
 
 message(">> Transformation complete")
 
-# Show what we have
-cat("\n--- Biomarker Availability ---\n")
-pheno_vars <- c("albumin_gL", "alp", "lncrp", "totchol", "lncreat_umol",
-                "hba1c", "sbp", "bun", "uap", "lymph", "mcv", "wbc")
-for (v in pheno_vars) {
-  n_ok <- sum(!is.na(df[[v]]))
-  cat(sprintf("  %-16s %6d / %d  (%.1f%%)\n",
-              v, n_ok, nrow(df), 100 * n_ok / nrow(df)))
+# ── 3b. Data quality: filter invalid ages ────────────────────────────────
+
+n_before <- nrow(df)
+n_bad_age <- sum(is.na(df$age) | df$age < 1 | df$age > 120, na.rm = TRUE)
+
+if (n_bad_age > 0) {
+  message(">> WARNING: ", n_bad_age, " rows with invalid age (NA, <1, or >120)")
+  message("   Age range before filter: ", min(df$age, na.rm = TRUE), " - ",
+          max(df$age, na.rm = TRUE))
+  df <- df[!is.na(df$age) & df$age >= 1 & df$age <= 120, ]
+  message("   After filter: ", nrow(df), " rows (removed ", n_before - nrow(df), ")")
 }
 
-# ── 4. Filter eligible subjects ──────────────────────────────────────────
+cat(sprintf("  Age range: %.0f - %.0f years\n",
+            min(df$age, na.rm = TRUE), max(df$age, na.rm = TRUE)))
+cat(sprintf("  Age mean (SD): %.1f (%.1f)\n",
+            mean(df$age, na.rm = TRUE), sd(df$age, na.rm = TRUE)))
 
-message("\n>> Filtering eligible subjects...")
+# ══════════════════════════════════════════════════════════════════════════
+# 4. BIOMARKER AVAILABILITY REPORT
+# ══════════════════════════════════════════════════════════════════════════
 
-# Use the pre-computed eligibility flags
-df$eligible_MAIN_PHENOAGE <- as.integer(df$eligible_MAIN_PHENOAGE)
-df$eligible_HEMATOLOGIC   <- as.integer(df$eligible_HEMATOLOGIC)
-df$eligible_B12_GLYCATION <- as.integer(df$eligible_B12_GLYCATION)
-df$eligible_RENAL         <- as.integer(df$eligible_RENAL)
+message("\n", strrep("=", 60))
+message("BIOMARKER AVAILABILITY REPORT")
+message(strrep("=", 60))
 
-n_elig_pheno <- sum(df$eligible_MAIN_PHENOAGE == 1, na.rm = TRUE)
-n_elig_hema  <- sum(df$eligible_HEMATOLOGIC == 1, na.rm = TRUE)
-n_elig_b12   <- sum(df$eligible_B12_GLYCATION == 1, na.rm = TRUE)
-n_elig_renal <- sum(df$eligible_RENAL == 1, na.rm = TRUE)
+cat("\n--- Levine 2018 PhenoAge (9 biomarkers + age) ---\n")
+levine_vars <- c("albumin", "alp", "glucose", "lncrp", "lncreat",
+                  "lymph", "mcv", "rdw", "wbc")
+for (v in levine_vars) {
+  if (v %in% names(df)) {
+    n_ok <- sum(!is.na(df[[v]]))
+    cat(sprintf("  %-12s %6d / %d  (%5.1f%%)  %s\n",
+                v, n_ok, nrow(df), 100 * n_ok / nrow(df),
+                ifelse(n_ok == 0, "<< MISSING", "")))
+  } else {
+    cat(sprintf("  %-12s      0 / %d  (  0.0%%)  << COLUMN NOT IN DATA\n",
+                v, nrow(df)))
+  }
+}
 
-cat(sprintf("  Main PhenoAge eligible:    %d / %d  (%.1f%%)\n",
-            n_elig_pheno, nrow(df), 100 * n_elig_pheno / nrow(df)))
-cat(sprintf("  Hematologic eligible:      %d / %d  (%.1f%%)\n",
-            n_elig_hema, nrow(df), 100 * n_elig_hema / nrow(df)))
-cat(sprintf("  B12/Glycation eligible:    %d / %d  (%.1f%%)\n",
-            n_elig_b12, nrow(df), 100 * n_elig_b12 / nrow(df)))
-cat(sprintf("  Renal eligible:            %d / %d  (%.1f%%)\n",
-            n_elig_renal, nrow(df), 100 * n_elig_renal / nrow(df)))
+cat("\n--- Sub-clock biomarkers ---\n")
+sub_vars <- c("rdw", "mcv", "rbc", "wbc", "lymph",  # hema
+              "ggt", "insulin", "alp",                 # hepatic
+              "trig", "totchol",                        # lipid
+              "vitaminB12", "hba1c",                    # micronutrient
+              "lncreat", "bun")                         # renal
+sub_vars <- unique(sub_vars)
+for (v in sub_vars) {
+  if (v %in% names(df)) {
+    n_ok <- sum(!is.na(df[[v]]))
+    cat(sprintf("  %-14s %6d / %d  (%5.1f%%)\n",
+                v, n_ok, nrow(df), 100 * n_ok / nrow(df)))
+  }
+}
+
+# Which sub-clocks can score?
+cat("\n--- Expected sub-clock coverage ---\n")
+for (nm in names(PANELS_SUB)) {
+  panel <- PANELS_SUB[[nm]]
+  avail <- vapply(panel, function(v) {
+    if (v %in% names(df)) sum(!is.na(df[[v]])) else 0L
+  }, integer(1))
+  # A row can be scored only if ALL biomarkers are non-NA
+  complete_rows <- sum(complete.cases(df[, intersect(panel, names(df)), drop = FALSE]))
+  cat(sprintf("  %-30s  %6d complete rows  (%5.1f%%)\n",
+              nm, complete_rows, 100 * complete_rows / nrow(df)))
+}
+
+# ── 4b. Eligibility flags ──
+cat("\n--- Pre-computed eligibility flags ---\n")
+for (flag in c("eligible_MAIN_PHENOAGE", "eligible_HEMATOLOGIC",
+               "eligible_B12_GLYCATION", "eligible_RENAL")) {
+  if (flag %in% names(df)) {
+    n_elig <- sum(as.integer(df[[flag]]) == 1, na.rm = TRUE)
+    cat(sprintf("  %-30s %6d / %d  (%5.1f%%)\n",
+                flag, n_elig, nrow(df), 100 * n_elig / nrow(df)))
+  }
+}
 
 # ══════════════════════════════════════════════════════════════════════════
 # 5. SCORE PHENOAGE (PRIORITY)
 # ══════════════════════════════════════════════════════════════════════════
 
 message("\n", strrep("=", 60))
-message("STEP 1: PhenoAge scoring (priority)")
+message("STEP 1: Scoring all clocks")
 message(strrep("=", 60))
 
-# PhenoAge original uses these exact 12 biomarkers INCLUDING SBP.
-# SBP (systolic blood pressure) is NOT available in our clinical lab data.
-#
-# Solution: We added a 'full_no_sbp' sub-clock to config.R that trains
-# PhenoAge on the same 11 biomarkers minus SBP. This is the PRIMARY
-# PhenoAge-like clock for clinical deployment.
-#
-# The canonical PhenoAge, KDM, and HD will return NA (expected behavior).
+# NOTE: Original Levine PhenoAge requires glucose, which is NOT in this dataset.
+# The published PhenoAge will return all NA.
+# The best PhenoAge approximation available: 'levine_no_glucose' sub-clock
+# (8 of 9 Levine biomarkers, trained on NHANES).
+# The best available clock with >80% coverage: 'hema_integrated'.
 
-# Score using the bundle
 scored <- score_patients(
   patient_data = df,
   bundle       = bundle,
-  name_map     = NULL  # Already mapped above
+  name_map     = NULL
 )
 
-n_phenoage <- sum(!is.na(scored$phenoage_orig))
-message(">> PhenoAge original scored: ", n_phenoage, " / ", nrow(scored))
-
-if (n_phenoage == 0) {
-  message(">> PhenoAge original: all NA (expected — SBP not available)")
-  message(">> The 'pheno_full_no_sbp' clock is the primary PhenoAge")
-  message("   approximation for this cohort (11/12 biomarkers, no SBP).")
-}
-
-# Check the full_no_sbp clock specifically
-n_full_no_sbp <- sum(!is.na(scored$pheno_full_no_sbp), na.rm = TRUE)
-if (n_full_no_sbp > 0) {
-  message(">> pheno_full_no_sbp scored: ", n_full_no_sbp, " / ", nrow(scored),
-          " — THIS IS YOUR PRIMARY CLOCK")
-} else {
-  message(">> pheno_full_no_sbp: 0 scored. Re-run run_pipeline.R to train it.")
-  message("   (The 'full_no_sbp' panel was just added to config.R)")
-}
-
 # ══════════════════════════════════════════════════════════════════════════
-# 6. SCORE ALL AVAILABLE SUB-CLOCKS
+# 6. CHECK SCORING RESULTS
 # ══════════════════════════════════════════════════════════════════════════
 
 message("\n", strrep("=", 60))
-message("STEP 2: Scoring all available clocks")
+message("STEP 2: Scoring results summary")
 message(strrep("=", 60))
 
-# Check which clocks produced non-NA values
 clock_cols <- grep("_advance$", names(scored), value = TRUE)
 cat("\n--- Clock Scoring Results ---\n")
 for (cc in clock_cols) {
   ba_col <- sub("_advance$", "", cc)
   n_ok <- sum(!is.na(scored[[cc]]))
-  cat(sprintf("  %-40s %6d / %d scored\n", ba_col, n_ok, nrow(scored)))
+  cat(sprintf("  %-40s %6d / %d scored  (%5.1f%%)\n",
+              ba_col, n_ok, nrow(scored), 100 * n_ok / nrow(scored)))
+}
+
+if (length(clock_cols) == 0) {
+  message("\n>> WARNING: No clocks scored any patients!")
+  message(">> This likely means the bundle was trained with different")
+  message("   biomarker names than what's in the clinical data.")
+  message(">> ACTION: Re-run source('run_pipeline.R') to retrain with")
+  message("   the corrected config.R, then re-run this script.")
 }
 
 # ══════════════════════════════════════════════════════════════════════════
-# 7. STATISTICAL SUMMARY — CORRELATION WITH AGE (PRIORITY)
+# 7. STATISTICAL SUMMARY — CORRELATION WITH AGE
 # ══════════════════════════════════════════════════════════════════════════
 
 message("\n", strrep("=", 60))
@@ -262,17 +289,13 @@ message(strrep("=", 60))
 
 # Merge scored data back with original cohort info
 results <- cbind(
-  df[, c("patient_id", "age", "sex", "source_file",
-         "eligible_MAIN_PHENOAGE", "eligible_HEMATOLOGIC",
-         "eligible_B12_GLYCATION", "eligible_RENAL"), drop = FALSE],
+  df[, c("patient_id", "age", "sex", "source_file"), drop = FALSE],
   scored[, setdiff(names(scored), c("patient_id", "age")), drop = FALSE]
 )
 
 # ── 7a. Cohort demographics ──
 cat("\n--- Cohort Demographics ---\n")
 cat(sprintf("  Total subjects:    %d\n", nrow(results)))
-cat(sprintf("  PARTE 1:           %d\n", sum(results$source_file == "PARTE1", na.rm = TRUE)))
-cat(sprintf("  PARTE 2:           %d\n", sum(results$source_file == "PARTE2", na.rm = TRUE)))
 cat(sprintf("  Female:            %d (%.1f%%)\n",
             sum(results$sex == "F", na.rm = TRUE),
             100 * mean(results$sex == "F", na.rm = TRUE)))
@@ -290,8 +313,7 @@ cat(sprintf("  Age median [IQR]:  %.0f [%.0f - %.0f]\n",
 
 # ── 7b. Correlation table: each BA clock vs chronological age ──
 cat("\n--- Correlation of Biological Age with Chronological Age ---\n")
-cat("(KEY validation: a good clock should correlate r > 0.8 with age)\n")
-cat("(PRIMARY clock for this cohort: pheno_full_no_sbp)\n\n")
+cat("(KEY validation: a good clock should correlate r > 0.8 with age)\n\n")
 
 ba_cols <- grep("^phenoage_|^pheno_", names(results), value = TRUE)
 ba_cols <- ba_cols[!grepl("_advance|_resid|_z$", ba_cols)]
@@ -322,12 +344,12 @@ for (bc in ba_cols) {
   }
 }
 
+cor_table <- NULL
 if (length(cor_stats) > 0) {
   cor_table <- do.call(rbind, cor_stats)
   rownames(cor_table) <- NULL
   cor_table <- cor_table[order(-abs(cor_table$r)), ]
 
-  # Format for display
   disp <- cor_table
   disp$r <- sprintf("%.4f", disp$r)
   disp$r_squared <- sprintf("%.4f", disp$r_squared)
@@ -339,10 +361,9 @@ if (length(cor_stats) > 0) {
   print(disp, row.names = FALSE)
 } else {
   message(">> No clocks had enough data to compute correlations")
-  cor_table <- NULL
 }
 
-# ── 7c. Advancement correlations ──
+# ── 7c. Advancement statistics ──
 cat("\n--- Advancement Statistics (BA - CA) ---\n")
 adv_cols <- grep("_advance$", names(results), value = TRUE)
 adv_stats <- list()
@@ -369,7 +390,7 @@ if (length(adv_stats) > 0) {
 }
 
 # ══════════════════════════════════════════════════════════════════════════
-# 8. PLOTS (displayed in viewer)
+# 8. PLOTS
 # ══════════════════════════════════════════════════════════════════════════
 
 message("\n", strrep("=", 60))
@@ -398,7 +419,7 @@ for (bc in ba_cols) {
   print(p)
 }
 
-# ── Pre-compute which advancement columns have data (used by Plots 2 & 4) ──
+# ── Pre-compute valid advancement columns ──
 valid_adv <- character(0)
 if (length(adv_cols) > 0) {
   has_data <- vapply(adv_cols, function(x) sum(!is.na(results[[x]])) > 30, logical(1))
@@ -407,29 +428,28 @@ if (length(adv_cols) > 0) {
 
 # ── Plot 2: Advancement distribution ──
 if (length(valid_adv) > 0) {
-  scored_adv <- results[, c("age", valid_adv), drop = FALSE]
+  long_adv <- pivot_longer(
+    results[, c("age", valid_adv), drop = FALSE],
+    cols = all_of(valid_adv),
+    names_to = "clock", values_to = "advancement"
+  )
+  long_adv$clock <- gsub("pheno_|phenoage_|_advance|_orig", "", long_adv$clock)
 
-  if (length(valid_adv) > 0) {
-    long_adv <- pivot_longer(scored_adv, cols = all_of(valid_adv),
-                             names_to = "clock", values_to = "advancement")
-    long_adv$clock <- gsub("pheno_|phenoage_|_advance|_orig", "", long_adv$clock)
-
-    p_adv <- ggplot(long_adv[!is.na(long_adv$advancement), ],
-                    aes(x = advancement)) +
-      geom_histogram(aes(y = after_stat(density)), bins = 50,
-                     fill = "steelblue", alpha = 0.6, colour = "white") +
-      geom_density(colour = "navy", linewidth = 0.8) +
-      geom_vline(xintercept = 0, linetype = "dashed", colour = "red") +
-      facet_wrap(~ clock, scales = "free") +
-      theme_minimal(base_size = 12) +
-      labs(title = "Distribution of Biological Age Advancement (BA - CA)",
-           subtitle = "Values > 0 = biologically older than chronological age",
-           x = "Advancement (years)", y = "Density")
-    print(p_adv)
-  }
+  p_adv <- ggplot(long_adv[!is.na(long_adv$advancement), ],
+                  aes(x = advancement)) +
+    geom_histogram(aes(y = after_stat(density)), bins = 50,
+                   fill = "steelblue", alpha = 0.6, colour = "white") +
+    geom_density(colour = "navy", linewidth = 0.8) +
+    geom_vline(xintercept = 0, linetype = "dashed", colour = "red") +
+    facet_wrap(~ clock, scales = "free") +
+    theme_minimal(base_size = 12) +
+    labs(title = "Distribution of Biological Age Advancement (BA - CA)",
+         subtitle = "Values > 0 = biologically older than chronological age",
+         x = "Advancement (years)", y = "Density")
+  print(p_adv)
 }
 
-# ── Plot 3: Age distribution of cohort ──
+# ── Plot 3: Age distribution ──
 p_age <- ggplot(results, aes(x = age)) +
   geom_histogram(bins = 40, fill = "steelblue", alpha = 0.7, colour = "white") +
   theme_minimal(base_size = 13) +
@@ -441,14 +461,6 @@ p_age <- ggplot(results, aes(x = age)) +
 print(p_age)
 
 # ── Plot 4: Advancement by age decade ──
-# Recompute valid_adv in case earlier block was skipped
-if (!exists("valid_adv")) {
-  valid_adv <- character(0)
-  if (length(adv_cols) > 0) {
-    has_data <- vapply(adv_cols, function(x) sum(!is.na(results[[x]])) > 30, logical(1))
-    valid_adv <- adv_cols[has_data]
-  }
-}
 if (length(valid_adv) > 0) {
   results$age_decade <- cut(results$age,
     breaks = c(0, 30, 40, 50, 60, 70, 80, 120),
@@ -498,19 +510,16 @@ message("\n", strrep("=", 60))
 message("STEP 5: Saving outputs")
 message(strrep("=", 60))
 
-# Save scored data
 write.csv(results, file.path(PROJECT_ROOT, "clinical_scored.csv"),
           row.names = FALSE)
 message(">> Saved: clinical_scored.csv")
 
-# Save correlation table
 if (!is.null(cor_table)) {
   write.csv(cor_table, file.path(PROJECT_ROOT, "clinical_stats_summary.csv"),
             row.names = FALSE)
   message(">> Saved: clinical_stats_summary.csv")
 }
 
-# Save clinical report
 tryCatch({
   report <- clinical_report_table(scored, bundle)
   write.csv(report, file.path(PROJECT_ROOT, "clinical_report.csv"),
@@ -524,31 +533,32 @@ tryCatch({
 # FINAL SUMMARY
 # ══════════════════════════════════════════════════════════════════════════
 
-n_clocks <- sum(vapply(ba_cols, function(x) sum(!is.na(results[[x]])) > 0, logical(1)))
+n_clocks <- length(clock_cols)
 
 cat("\n")
 cat("==========================================================\n")
 cat("  CLINICAL SCORING COMPLETE\n")
 cat("==========================================================\n")
 cat("  Cohort:           ", nrow(results), " subjects\n")
-cat("  PARTE 1:          ", sum(results$source_file == "PARTE1", na.rm = TRUE), "\n")
-cat("  PARTE 2:          ", sum(results$source_file == "PARTE2", na.rm = TRUE), "\n")
 cat("  Clocks scored:    ", n_clocks, "\n")
 if (!is.null(cor_table) && nrow(cor_table) > 0) {
   best <- cor_table[1, ]
   cat("  Best r(BA, age):  ", sprintf("%.4f", best$r), " (", best$clock, ")\n")
 }
-cat("\n  IMPORTANT: SBP (blood pressure) is NOT available in this\n")
-cat("  cohort. PhenoAge original, KDM, and HD require SBP and\n")
-cat("  will show NA. Use 'pheno_full_no_sbp' as the primary\n")
-cat("  PhenoAge-like clock (11/12 original biomarkers, no SBP).\n")
+cat("\n  NOTES:\n")
+cat("  - Glucose is NOT available in this cohort.\n")
+cat("    Original Levine PhenoAge (9 biomarkers) cannot be computed.\n")
+cat("  - Best available clocks: hema_integrated (85% coverage),\n")
+cat("    levine_no_glucose (8/9 Levine biomarkers).\n")
+cat("  - SBP also missing: KDM and HD will show NA.\n")
+cat("\n  IMPORTANT: If 0 clocks scored, re-run run_pipeline.R\n")
+cat("  to retrain with the corrected config.R biomarker panels.\n")
 cat("\n  Output files:\n")
 cat("    - clinical_scored.csv\n")
 cat("    - clinical_stats_summary.csv\n")
 cat("    - clinical_report.csv\n")
 cat("==========================================================\n")
 
-# Store for interactive use
 clinical_results <- list(
   data      = results,
   scored    = scored,

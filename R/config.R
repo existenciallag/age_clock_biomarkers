@@ -6,30 +6,44 @@
 # the pipeline.  No other file needs to change.
 #
 # Conventions
-#   - PhenoAge-style clocks use albumin_gL / lncreat_umol (NHANES units)
-#   - KDM / HD clocks use albumin / lncreat (BioAge internal units)
+#   - PhenoAge Levine 2018 uses 9 biomarkers + age (age added internally)
+#   - BioAge variable names match NHANES III/IV column names
 #   - Sub-clocks are always trained via phenoage_nhanes()
 ###############################################################################
 
 # ── 1. Canonical biomarker panels ──────────────────────────────────────────
 
-#' Original 12-biomarker PhenoAge panel (Levine et al.)
-BIOMARKERS_PHENO_ORIG <- c(
-  "albumin_gL", "alp", "lncrp", "totchol",
-  "lncreat_umol", "hba1c", "sbp", "bun",
-  "uap", "lymph", "mcv", "wbc"
+#' Original Levine 2018 PhenoAge: 9 biomarkers
+#' (chronological age is added by the algorithm, not listed here)
+#'
+#' Units in NHANES:
+#'   albumin    = g/dL
+#'   alp        = U/L  (alkaline phosphatase)
+#'   glucose    = mg/dL (serum glucose)
+#'   lncrp      = log(CRP mg/dL)
+#'   lncreat    = log(creatinine mg/dL)
+#'   lymph      = lymphocyte %
+#'   mcv        = fL   (mean cell volume)
+#'   rdw        = %    (red cell distribution width)
+#'   wbc        = 1000 cells/uL
+BIOMARKERS_PHENO_LEVINE <- c(
+  "albumin", "alp", "glucose", "lncrp", "lncreat",
+  "lymph", "mcv", "rdw", "wbc"
 )
 
-#' Panel shared by KDM and HD clocks (BioAge internal names)
+#' Alias: keep backward compatibility
+BIOMARKERS_PHENO_ORIG <- BIOMARKERS_PHENO_LEVINE
+
+#' Panel shared by KDM and HD clocks (same BioAge internal names)
+#' NOTE: KDM/HD use a broader 12-biomarker set
 BIOMARKERS_KDM_HD <- c(
   "albumin", "alp", "lncrp", "totchol",
   "lncreat", "hba1c", "sbp", "bun",
   "uap", "lymph", "mcv", "wbc"
 )
 
-#' Global PhenoAge panel — same as original by default.
-#' Override to test reduced global panels.
-PANEL_GLOBAL <- BIOMARKERS_PHENO_ORIG
+#' Global PhenoAge panel — same as Levine by default.
+PANEL_GLOBAL <- BIOMARKERS_PHENO_LEVINE
 
 # ── 2. Sub-clock panel definitions ─────────────────────────────────────────
 #' Each entry maps a short name → character vector of biomarkers.
@@ -40,16 +54,14 @@ PANELS_SUB <- list(
   hepatic_lipid             = c("trig", "totchol"),
   hema_integrated           = c("rdw", "mcv", "rbc", "wbc", "lymph"),
   micronutrient_methylation = c("vitaminB12", "hba1c", "rdw"),
-  renal_A                   = c("lncreat_umol", "bun"),
-  # Full PhenoAge panel minus SBP — for cohorts lacking blood pressure data
-  full_no_sbp               = c("albumin_gL", "alp", "lncrp", "totchol",
-                                 "lncreat_umol", "hba1c", "bun",
-                                 "uap", "lymph", "mcv", "wbc")
+  renal_A                   = c("lncreat", "bun"),
+  # Levine-9 minus glucose — for cohorts lacking glucose data
+  levine_no_glucose         = c("albumin", "alp", "lncrp", "lncreat",
+                                 "lymph", "mcv", "rdw", "wbc")
 )
 
 # ── 3. System-level grouping ───────────────────────────────────────────────
 #' Maps each sub-clock name to a physiological system label.
-#' Used for forest-plot grouping and clinical report sections.
 
 PANEL_SYSTEM <- c(
   hepatic_enzime_insulin    = "Hepatic",
@@ -57,37 +69,54 @@ PANEL_SYSTEM <- c(
   hema_integrated           = "Hematologic",
   micronutrient_methylation = "Micronutrient / Methylation",
   renal_A                   = "Renal",
-  full_no_sbp               = "Global (no SBP)"
+  levine_no_glucose         = "Global (no Glucose)"
 )
 
-# ── 4. QC thresholds ──────────────────────────────────────────────────────
+# ── 4. Published Levine 2018 PhenoAge coefficients ────────────────────────
+#' These are the EXACT published coefficients from Levine (2018) Table S2.
+#' Used for direct scoring without a trained fit object.
+#'
+#' Mortality score: xb = sum(beta_i * x_i)
+#' Then: M = 1 - exp(-exp(xb) * (exp(120*gamma) - 1) / gamma)
+#' Then: PhenoAge = 141.50225 + ln(-0.00553 * ln(1-M)) / 0.090165
 
-#' Minimum number of finite observations to consider a clock valid for
-#' survival analysis.
+LEVINE_2018_COEFS <- c(
+  intercept = -19.9067,
+  albumin   =  -0.0336,   # g/dL
+  alp       =   0.00188,  # U/L
+  glucose   =   0.00553,  # mg/dL (NOTE: called "serum glucose" in paper)
+  lncrp     =   0.0954,   # log(CRP mg/dL)
+  lncreat   =   0.0095,   # log(creatinine mg/dL)
+  lymph     =  -0.0120,   # lymphocyte %
+  mcv       =   0.0268,   # fL
+  rdw       =   0.3306,   # %
+  wbc       =   0.0554,   # 1000 cells/uL
+  age       =   0.0804    # years
+)
+
+LEVINE_GAMMA_MORT   <- 0.0076927   # Gompertz mortality rate
+LEVINE_PHENOAGE_A   <- 141.50225   # PhenoAge inversion intercept
+LEVINE_PHENOAGE_B   <- -0.00553    # PhenoAge inversion factor
+LEVINE_PHENOAGE_C   <- 0.090165    # PhenoAge inversion slope
+
+# ── 5. QC thresholds ──────────────────────────────────────────────────────
+
 QC_MIN_N <- 2000
-
-#' Minimum standard deviation — guards against near-constant clocks.
 QC_MIN_SD <- 0
-
-#' Minimum sample size for a Cox model to be reported.
 COX_MIN_N <- 200
 
-# ── 5. Mortality column detection ─────────────────────────────────────────
-#' Patterns used to auto-detect mortality status and follow-up columns.
-#' BioAge already renames mortstat -> status, permth_exm -> time.
-#' Checked in order; first match wins.
+# ── 6. Mortality column detection ─────────────────────────────────────────
 
 MORT_STATUS_PATTERNS <- c("^status$", "mortstat", "dies", "dead", "outcome")
 MORT_TIME_PATTERNS   <- c("^time$", "permth_exm", "permth_int", "followup", "surv")
 
-# ── 6. Health outcome columns (from BioAge NHANES IV) ───────────────────
-#' These are used by BioAge::table_health() and our health correlation step.
-HEALTH_OUTCOMES <- c("health", "adl", "lnwalk", "grip_scaled")
+# ── 7. Health outcome columns (from BioAge NHANES IV) ───────────────────
 
-#' SES variables for BioAge::table_ses()
+HEALTH_OUTCOMES <- c("health", "adl", "lnwalk", "grip_scaled")
 SES_VARS <- c("edu", "annual_income", "poverty_ratio")
 
-# ── 7. Palette defaults ───────────────────────────────────────────────────
+# ── 8. Palette defaults ───────────────────────────────────────────────────
+
 HEATMAP_PALETTE <- c("blue", "white", "red")
 FOREST_COLOUR   <- "steelblue"
 KM_COLOURS      <- c("darkgreen", "gray40", "darkred")
