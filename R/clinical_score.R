@@ -107,95 +107,90 @@ score_phenoage_levine2018 <- function(data) {
 # B) BUNDLE-BASED SCORING — uses trained fit objects
 # ══════════════════════════════════════════════════════════════════════════
 
-#' Extract coefficient vector from a BioAge fit object
+#' Extract regression coefficients AND Gompertz gamma from a BioAge fit object
 #'
-#' BioAge's phenoage_nhanes() uses flexsurv::flexsurvreg() internally.
-#' The fit object may be a flexsurvreg, coxph, or custom list.
-#' This function tries every possible extraction method.
-extract_fit_coefs <- function(fit) {
+#' BioAge's phenoage_nhanes() uses flexsurv::flexsurvreg() with a Gompertz
+#' distribution. The fit object contains:
+#'   - Distribution parameters: "rate" and "shape" (= Gompertz gamma)
+#'   - Regression coefficients: one per biomarker
+#'
+#' This function returns a list with $betas (regression coefs) and $gamma.
+extract_fit_params <- function(fit) {
 
-  # Method 1: try coef() generically (works for coxph, flexsurvreg, glm, etc.)
+  # The distribution parameter names in a Gompertz flexsurvreg
+  dist_params <- c("rate", "shape")
+
+  # ── Method A: flexsurvreg object (class preserved when flexsurv loaded) ──
+  if (inherits(fit, "flexsurvreg")) {
+    all_coefs <- coef(fit)
+    gamma <- unname(all_coefs["shape"])
+    betas <- all_coefs[!names(all_coefs) %in% dist_params]
+    return(list(betas = betas, gamma = gamma))
+  }
+
+  # ── Method B: flexsurvreg saved as list (class lost, $res matrix present) ──
+  if (is.list(fit) && !is.null(fit$res) && is.matrix(fit$res)) {
+    all_coefs <- fit$res[, "est"]
+    gamma <- unname(all_coefs["shape"])
+    betas <- all_coefs[!names(all_coefs) %in% dist_params]
+    if (length(betas) > 0) {
+      return(list(betas = betas, gamma = gamma))
+    }
+  }
+
+  # ── Method C: $res.t matrix (alternative flexsurv storage) ──
+  if (is.list(fit) && !is.null(fit$res.t) && is.matrix(fit$res.t)) {
+    all_coefs <- fit$res.t[, "est"]
+    gamma <- unname(all_coefs["shape"])
+    betas <- all_coefs[!names(all_coefs) %in% dist_params]
+    if (length(betas) > 0) {
+      return(list(betas = betas, gamma = gamma))
+    }
+  }
+
+  # ── Method D: coxph object ──
+  if (inherits(fit, "coxph")) {
+    return(list(betas = coef(fit), gamma = LEVINE_GAMMA_MORT))
+  }
+
+  # ── Method E: try coef() generically ──
   coefs <- tryCatch(coef(fit), error = function(e) NULL)
   if (!is.null(coefs) && is.numeric(coefs) && length(coefs) > 1) {
-    return(coefs)
+    gamma <- if ("shape" %in% names(coefs)) unname(coefs["shape"]) else LEVINE_GAMMA_MORT
+    betas <- coefs[!names(coefs) %in% dist_params]
+    return(list(betas = betas, gamma = gamma))
   }
 
-  # Method 2: flexsurvreg stores coefficients in $res or $res.t
-  if (!is.null(fit$res) && is.matrix(fit$res)) {
-    coefs <- fit$res[, "est"]
-    if (!is.null(coefs) && length(coefs) > 1) return(coefs)
-  }
-  if (!is.null(fit$res.t) && is.matrix(fit$res.t)) {
-    coefs <- fit$res.t[, "est"]
-    if (!is.null(coefs) && length(coefs) > 1) return(coefs)
+  # ── Method F: $coefficients directly ──
+  if (!is.null(fit$coefficients) && is.numeric(fit$coefficients)) {
+    return(list(betas = fit$coefficients, gamma = LEVINE_GAMMA_MORT))
   }
 
-  # Method 3: direct $coefficients (numeric vector)
-  if (!is.null(fit$coefficients)) {
-    if (is.numeric(fit$coefficients) && length(fit$coefficients) > 1) {
-      return(fit$coefficients)
-    }
-    # Could be a matrix: extract first column
-    if (is.matrix(fit$coefficients)) {
-      coefs <- fit$coefficients[, 1]
-      names(coefs) <- rownames(fit$coefficients)
-      return(coefs)
-    }
-    # Could be a data.frame
-    if (is.data.frame(fit$coefficients)) {
-      coefs <- fit$coefficients[, 1]
-      names(coefs) <- rownames(fit$coefficients)
-      return(coefs)
-    }
-  }
-
-  # Method 4: $coef
-  if (!is.null(fit$coef) && is.numeric(fit$coef) && length(fit$coef) > 1) {
-    return(fit$coef)
-  }
-
-  # Method 5: recursive search for named numeric vectors > length 2
+  # ── Method G: recursive search for $res-like matrices ──
   if (is.list(fit)) {
     for (nm in names(fit)) {
       v <- fit[[nm]]
-      if (is.numeric(v) && length(v) > 2 && !is.null(names(v))) {
-        return(v)
-      }
-      if (is.list(v)) {
-        for (nm2 in names(v)) {
-          v2 <- v[[nm2]]
-          if (is.numeric(v2) && length(v2) > 2 && !is.null(names(v2))) {
-            return(v2)
-          }
-        }
+      if (is.matrix(v) && "est" %in% colnames(v) && nrow(v) > 2) {
+        all_coefs <- v[, "est"]
+        gamma <- if ("shape" %in% names(all_coefs)) unname(all_coefs["shape"]) else LEVINE_GAMMA_MORT
+        betas <- all_coefs[!names(all_coefs) %in% dist_params]
+        if (length(betas) > 0) return(list(betas = betas, gamma = gamma))
       }
     }
   }
 
-  # DEBUG: print the structure so user can report it
-  message("  DEBUG: fit object structure:")
+  # DEBUG: dump structure if all methods fail
+  message("  DEBUG extract_fit_params failed:")
   message("    class: ", paste(class(fit), collapse = ", "))
   message("    names: ", paste(names(fit), collapse = ", "))
-  for (nm in names(fit)) {
+  for (nm in names(fit)[1:min(length(names(fit)), 10)]) {
     v <- fit[[nm]]
     message("    $", nm, ": class=", paste(class(v), collapse = ","),
-            " length=", length(v),
-            if (is.numeric(v) && length(v) <= 20) paste0(" values=", paste(round(v, 4), collapse = ",")) else "")
+            " dim=", paste(dim(v), collapse = "x"),
+            " length=", length(v))
   }
 
   NULL
-}
-
-#' Extract Gompertz gamma from a fit object
-extract_fit_gamma <- function(fit) {
-  if (!is.null(fit$gamma) && is.numeric(fit$gamma)) return(fit$gamma)
-  if (is.list(fit)) {
-    for (nm in names(fit)) {
-      if (nm == "gamma" && is.numeric(fit[[nm]])) return(fit[[nm]])
-    }
-  }
-  # Default: Levine 2018 Gompertz gamma
-  LEVINE_GAMMA_MORT
 }
 
 #' Score PhenoAge using a trained fit object from the bundle
@@ -208,23 +203,30 @@ score_phenoage <- function(new_data, fit, biomarkers) {
 
   n <- nrow(new_data)
 
-  # Extract coefficients
-  coefs <- extract_fit_coefs(fit)
-  if (is.null(coefs)) {
+  # Extract regression betas and Gompertz gamma
+  params <- extract_fit_params(fit)
+  if (is.null(params)) {
     warning("Could not extract coefficients from fit object (class: ",
             paste(class(fit), collapse = "/"), ")")
     return(rep(NA_real_, n))
   }
 
-  # Match biomarkers: must exist in BOTH data and coefficients
+  betas <- params$betas
+  gamma <- params$gamma
+  if (is.na(gamma) || is.null(gamma)) gamma <- LEVINE_GAMMA_MORT
+
+  message("  Extracted ", length(betas), " betas, gamma=", round(gamma, 6))
+  message("  Beta names: ", paste(names(betas), collapse = ", "))
+
+  # Match biomarkers: must exist in BOTH data and betas
   bm_in_data  <- intersect(biomarkers, names(new_data))
-  bm_in_coefs <- intersect(biomarkers, names(coefs))
+  bm_in_coefs <- intersect(biomarkers, names(betas))
   bm_matched  <- intersect(bm_in_data, bm_in_coefs)
 
   if (length(bm_matched) == 0) {
     warning("No biomarker match. Data has: ",
             paste(bm_in_data, collapse = ", "),
-            ". Coefs have: ", paste(names(coefs), collapse = ", "))
+            ". Betas have: ", paste(names(betas), collapse = ", "))
     return(rep(NA_real_, n))
   }
 
@@ -234,19 +236,19 @@ score_phenoage <- function(new_data, fit, biomarkers) {
             paste(missing, collapse = ", "))
   }
 
+  message("  Scoring with ", length(bm_matched), " matched biomarkers: ",
+          paste(bm_matched, collapse = ", "))
+
   # Linear predictor: xb = X %*% beta
   mat <- as.matrix(new_data[, bm_matched, drop = FALSE])
-  xb  <- as.numeric(mat %*% coefs[bm_matched])
+  xb  <- as.numeric(mat %*% betas[bm_matched])
 
-  # Add age component if it's in the coefficients but NOT in biomarkers list
-  if ("age" %in% names(coefs) && !"age" %in% biomarkers) {
+  # Add age component if it's in betas but NOT in biomarkers list
+  if ("age" %in% names(betas) && !"age" %in% biomarkers) {
     if ("age" %in% names(new_data)) {
-      xb <- xb + coefs["age"] * as.numeric(new_data$age)
+      xb <- xb + betas["age"] * as.numeric(new_data$age)
     }
   }
-
-  # Gompertz gamma from fit
-  gamma <- extract_fit_gamma(fit)
 
   # Mortality probability (120 months)
   M <- 1 - exp(-exp(xb) * (exp(120 * gamma) - 1) / gamma)
