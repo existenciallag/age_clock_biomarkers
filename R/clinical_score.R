@@ -109,44 +109,78 @@ score_phenoage_levine2018 <- function(data) {
 
 #' Extract coefficient vector from a BioAge fit object
 #'
-#' BioAge's phenoage_nhanes() returns fit objects that may be:
-#'   - A coxph object (has $coefficients)
-#'   - A list with nested components
-#'   - A list with $coef or $coefficients
-#' This function tries multiple extraction methods.
+#' BioAge's phenoage_nhanes() uses flexsurv::flexsurvreg() internally.
+#' The fit object may be a flexsurvreg, coxph, or custom list.
+#' This function tries every possible extraction method.
 extract_fit_coefs <- function(fit) {
-  # Method 1: coxph object
-  if (inherits(fit, "coxph")) {
-    return(coef(fit))
+
+  # Method 1: try coef() generically (works for coxph, flexsurvreg, glm, etc.)
+  coefs <- tryCatch(coef(fit), error = function(e) NULL)
+  if (!is.null(coefs) && is.numeric(coefs) && length(coefs) > 1) {
+    return(coefs)
   }
 
-  # Method 2: direct $coefficients
-  if (!is.null(fit$coefficients) && is.numeric(fit$coefficients)) {
-    return(fit$coefficients)
+  # Method 2: flexsurvreg stores coefficients in $res or $res.t
+  if (!is.null(fit$res) && is.matrix(fit$res)) {
+    coefs <- fit$res[, "est"]
+    if (!is.null(coefs) && length(coefs) > 1) return(coefs)
+  }
+  if (!is.null(fit$res.t) && is.matrix(fit$res.t)) {
+    coefs <- fit$res.t[, "est"]
+    if (!is.null(coefs) && length(coefs) > 1) return(coefs)
   }
 
-  # Method 3: $coef
-  if (!is.null(fit$coef) && is.numeric(fit$coef)) {
+  # Method 3: direct $coefficients (numeric vector)
+  if (!is.null(fit$coefficients)) {
+    if (is.numeric(fit$coefficients) && length(fit$coefficients) > 1) {
+      return(fit$coefficients)
+    }
+    # Could be a matrix: extract first column
+    if (is.matrix(fit$coefficients)) {
+      coefs <- fit$coefficients[, 1]
+      names(coefs) <- rownames(fit$coefficients)
+      return(coefs)
+    }
+    # Could be a data.frame
+    if (is.data.frame(fit$coefficients)) {
+      coefs <- fit$coefficients[, 1]
+      names(coefs) <- rownames(fit$coefficients)
+      return(coefs)
+    }
+  }
+
+  # Method 4: $coef
+  if (!is.null(fit$coef) && is.numeric(fit$coef) && length(fit$coef) > 1) {
     return(fit$coef)
   }
 
-  # Method 4: nested — look for named numeric vectors in the fit
+  # Method 5: recursive search for named numeric vectors > length 2
   if (is.list(fit)) {
     for (nm in names(fit)) {
       v <- fit[[nm]]
-      if (is.numeric(v) && length(v) > 1 && !is.null(names(v))) {
+      if (is.numeric(v) && length(v) > 2 && !is.null(names(v))) {
         return(v)
       }
-      # One level deeper
       if (is.list(v)) {
         for (nm2 in names(v)) {
           v2 <- v[[nm2]]
-          if (is.numeric(v2) && length(v2) > 1 && !is.null(names(v2))) {
+          if (is.numeric(v2) && length(v2) > 2 && !is.null(names(v2))) {
             return(v2)
           }
         }
       }
     }
+  }
+
+  # DEBUG: print the structure so user can report it
+  message("  DEBUG: fit object structure:")
+  message("    class: ", paste(class(fit), collapse = ", "))
+  message("    names: ", paste(names(fit), collapse = ", "))
+  for (nm in names(fit)) {
+    v <- fit[[nm]]
+    message("    $", nm, ": class=", paste(class(v), collapse = ","),
+            " length=", length(v),
+            if (is.numeric(v) && length(v) <= 20) paste0(" values=", paste(round(v, 4), collapse = ",")) else "")
   }
 
   NULL
