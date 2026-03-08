@@ -33,6 +33,8 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(ggplot2)
   library(tidyr)
+  library(BioAge)       # MUST load before reading bundle — fit objects are
+  library(flexsurv)     # flexsurvreg class; without this they lose their class
 })
 
 # Source modules
