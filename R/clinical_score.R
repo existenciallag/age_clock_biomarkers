@@ -148,33 +148,38 @@ score_phenoage <- function(new_data, fit, biomarkers) {
     return(rep(NA_real_, n))
   }
 
-  # ── Match biomarkers between data and model ──
-  bm_in_data  <- intersect(biomarkers, names(new_data))
-  bm_in_model <- intersect(biomarkers, names(betas))
-  bm_matched  <- intersect(bm_in_data, bm_in_model)
+  # ── Match ALL model variables against data columns ──
+  # BioAge models include age (and sometimes other covariates) in the
 
-  if (length(bm_matched) == 0) {
-    # Try without "age" — BioAge models include age in the coefficient table
-    # but it's not listed in the biomarkers panel
-    all_in_model <- names(betas)
-    all_in_data  <- names(new_data)
-    bm_matched   <- intersect(all_in_model, all_in_data)
-    bm_matched   <- bm_matched[bm_matched != "(Intercept)"]
+  # coefficient table beyond the biomarker panel.  We must include ALL
+  # model variables that exist in the data — not just the panel list —
+  # otherwise xb is incomplete and the Gompertz formula produces NaN.
+  all_model_vars <- names(betas)
+  all_model_vars <- all_model_vars[all_model_vars != "(Intercept)"]
+  vars_matched   <- intersect(all_model_vars, names(new_data))
 
-    if (length(bm_matched) == 0) {
-      warning("No biomarker match.\n  Data cols: ",
-              paste(head(bm_in_data, 20), collapse = ", "),
-              "\n  Model vars: ", paste(names(betas), collapse = ", "))
-      return(rep(NA_real_, n))
-    }
+  if (length(vars_matched) == 0) {
+    warning("No variable match.\n  Data cols: ",
+            paste(head(names(new_data), 20), collapse = ", "),
+            "\n  Model vars: ", paste(all_model_vars, collapse = ", "))
+    return(rep(NA_real_, n))
   }
 
-  message("  Scoring with ", length(bm_matched), "/", length(betas),
-          " vars: ", paste(bm_matched, collapse = ", "))
+  # Check that at least some biomarkers (not just age) are present
+  bm_matched <- intersect(biomarkers, vars_matched)
+  if (length(bm_matched) == 0) {
+    warning("No biomarker from panel found in data.\n  Panel: ",
+            paste(biomarkers, collapse = ", "),
+            "\n  Data cols: ", paste(head(names(new_data), 20), collapse = ", "))
+    return(rep(NA_real_, n))
+  }
+
+  message("  Scoring with ", length(vars_matched), "/", length(all_model_vars),
+          " model vars: ", paste(vars_matched, collapse = ", "))
 
   # ── Build linear predictor ──
-  mat <- as.matrix(new_data[, bm_matched, drop = FALSE])
-  xb  <- as.numeric(mat %*% betas[bm_matched])
+  mat <- as.matrix(new_data[, vars_matched, drop = FALSE])
+  xb  <- as.numeric(mat %*% betas[vars_matched])
 
   # Add intercept if present
   if ("(Intercept)" %in% names(betas)) {
