@@ -132,40 +132,56 @@ score_phenoage <- function(new_data, fit, biomarkers) {
   n <- nrow(new_data)
 
   # ── Extract coefficients from BioAge fit format ──
-  # $coef is a data.frame: row names = variable names, single column = betas
+  #
+  # BioAge stores flexsurvreg coefficients in fit$coef as a data.frame.
+  # The row structure from a Gompertz model is:
+  #   Row 1: "shape"  — Gompertz gamma (already stored as m_d)
+  #   Row 2: "rate"   — baseline log-hazard (the INTERCEPT of the linear predictor)
+  #   Rows 3+: covariate betas (biomarkers + age)
+  #
+  # The scoring formula (from BioAge source phenoage_calc.R):
+  #   xb = sum(x_i * beta_i) + coef["rate",]   (rate = intercept)
+  #   M  = 1 - exp(m_n * exp(xb) / m_d)         (m_n is negative)
+  #   PhenoAge = log(BA_n * log(1 - M)) / BA_d + BA_i
+
   if (is.null(fit$coef)) {
     warning("Fit object has no $coef component")
     return(rep(NA_real_, n))
   }
 
   if (is.data.frame(fit$coef)) {
-    betas <- fit$coef[, 1]
-    names(betas) <- rownames(fit$coef)
+    all_coefs <- fit$coef[, 1]
+    names(all_coefs) <- rownames(fit$coef)
   } else if (is.numeric(fit$coef)) {
-    betas <- fit$coef
+    all_coefs <- fit$coef
   } else {
     warning("fit$coef is class ", class(fit$coef), ", expected data.frame")
     return(rep(NA_real_, n))
   }
 
-  # ── Match ALL model variables against data columns ──
-  # BioAge models include age (and sometimes other covariates) in the
+  # Separate Gompertz structural parameters from covariate betas
+  # "shape" and "rate" are flexsurvreg parameters, not biomarker coefficients
+  intercept_val <- 0
+  if ("rate" %in% names(all_coefs)) {
+    intercept_val <- all_coefs["rate"]
+  }
 
-  # coefficient table beyond the biomarker panel.  We must include ALL
-  # model variables that exist in the data — not just the panel list —
-  # otherwise xb is incomplete and the Gompertz formula produces NaN.
-  all_model_vars <- names(betas)
-  all_model_vars <- all_model_vars[all_model_vars != "(Intercept)"]
-  vars_matched   <- intersect(all_model_vars, names(new_data))
+  # Covariate betas: everything except "shape" and "rate"
+  exclude <- c("shape", "rate")
+  betas <- all_coefs[!names(all_coefs) %in% exclude]
+
+  # ── Match model covariate variables against data columns ──
+  # BioAge models include age in the covariate betas (not just biomarkers)
+  vars_matched <- intersect(names(betas), names(new_data))
 
   if (length(vars_matched) == 0) {
     warning("No variable match.\n  Data cols: ",
             paste(head(names(new_data), 20), collapse = ", "),
-            "\n  Model vars: ", paste(all_model_vars, collapse = ", "))
+            "\n  Model vars: ", paste(names(betas), collapse = ", "))
     return(rep(NA_real_, n))
   }
 
-  # Check that at least some biomarkers (not just age) are present
+  # Sanity: at least some biomarkers from the panel (not just age)
   bm_matched <- intersect(biomarkers, vars_matched)
   if (length(bm_matched) == 0) {
     warning("No biomarker from panel found in data.\n  Panel: ",
@@ -174,31 +190,34 @@ score_phenoage <- function(new_data, fit, biomarkers) {
     return(rep(NA_real_, n))
   }
 
-  message("  Scoring with ", length(vars_matched), "/", length(all_model_vars),
-          " model vars: ", paste(vars_matched, collapse = ", "))
+  message("  Scoring with ", length(vars_matched), "/", length(betas),
+          " covariate vars: ", paste(vars_matched, collapse = ", "))
 
-  # ── Build linear predictor ──
+  # ── Build linear predictor (exactly as BioAge does) ──
+  # xb = sum(x_i * beta_i for matched covariates) + rate
   mat <- as.matrix(new_data[, vars_matched, drop = FALSE])
-  xb  <- as.numeric(mat %*% betas[vars_matched])
-
-  # Add intercept if present
-  if ("(Intercept)" %in% names(betas)) {
-    xb <- xb + betas["(Intercept)"]
-  }
+  xb  <- as.numeric(mat %*% betas[vars_matched]) + intercept_val
 
   # ── Gompertz mortality & PhenoAge conversion ──
-  # Use BioAge's trained parameters from the fit object
-  m_n  <- if (!is.null(fit$m_n))  fit$m_n  else 120
-  m_d  <- if (!is.null(fit$m_d))  fit$m_d  else LEVINE_GAMMA_MORT
-  BA_n <- if (!is.null(fit$BA_n)) fit$BA_n else LEVINE_PHENOAGE_B
-  BA_d <- if (!is.null(fit$BA_d)) fit$BA_d else LEVINE_PHENOAGE_C
-  BA_i <- if (!is.null(fit$BA_i)) fit$BA_i else LEVINE_PHENOAGE_A
+  # Parameters from fit object (pre-computed by BioAge during training)
+  # m_n = -(exp(120 * shape) - 1)   [already negative]
+  # m_d = shape (Gompertz gamma)
+  m_n  <- fit$m_n
+  m_d  <- fit$m_d
+  BA_n <- fit$BA_n
+  BA_d <- fit$BA_d
+  BA_i <- fit$BA_i
 
-  # Mortality probability
-  M <- 1 - exp(-exp(xb) * (exp(m_n * m_d) - 1) / m_d)
+  if (is.null(m_n) || is.null(m_d) || is.null(BA_n) || is.null(BA_d) || is.null(BA_i)) {
+    warning("Fit object missing Gompertz parameters (m_n/m_d/BA_n/BA_d/BA_i)")
+    return(rep(NA_real_, n))
+  }
+
+  # Mortality probability: BioAge formula (m_n is negative → exponent is negative → valid)
+  M <- 1 - exp(m_n * exp(xb) / m_d)
 
   # PhenoAge inversion
-  phenoage <- BA_i + log(BA_n * log(1 - M)) / BA_d
+  phenoage <- log(BA_n * log(1 - M)) / BA_d + BA_i
 
   n_ok <- sum(!is.na(phenoage) & is.finite(phenoage))
   message("  -> ", n_ok, " / ", n, " valid PhenoAge values")
