@@ -104,11 +104,23 @@ df <- merge(scored, raw[, merge_cols, drop = FALSE],
 
 # ── Identify available advancement columns ────────────────────────────────
 adv_cols <- grep("_advance$", names(df), value = TRUE)
-# Pick the primary advancement column (phenoage_orig preferred)
-primary_adv <- if ("phenoage_orig_advance" %in% adv_cols) {
-  "phenoage_orig_advance"
-} else {
-  adv_cols[1]
+
+# Pick the primary advancement column: prefer phenoage_orig, otherwise
+# choose the clock with the MOST non-NA values (not just alphabetically first)
+primary_adv <- NULL
+if ("phenoage_orig_advance" %in% adv_cols) {
+  n_orig <- sum(!is.na(df[["phenoage_orig_advance"]]) &
+                is.finite(df[["phenoage_orig_advance"]]))
+  if (n_orig >= 100) primary_adv <- "phenoage_orig_advance"
+}
+if (is.null(primary_adv)) {
+  adv_counts <- sapply(adv_cols, function(ac) {
+    sum(!is.na(df[[ac]]) & is.finite(df[[ac]]))
+  })
+  primary_adv <- adv_cols[which.max(adv_counts)]
+  message(">> Note: phenoage_orig not available or too sparse.")
+  message(">> Selected clock with most data: ", primary_adv,
+          " (n = ", max(adv_counts), ")")
 }
 
 if (is.null(primary_adv) || length(adv_cols) == 0) {
@@ -217,8 +229,14 @@ for (ac in adv_cols) {
 
 # --- 1d. Plot: Mean advancement trajectory across age groups ---
 if (nrow(age_strat_table) > 0) {
+  # Include all clocks that have at least 3 age groups with n >= 20
+  clock_coverage <- age_strat_table %>%
+    filter(n >= 20) %>%
+    group_by(clock) %>%
+    summarise(n_groups = n(), .groups = "drop") %>%
+    filter(n_groups >= 3)
   traj <- age_strat_table %>%
-    filter(grepl("phenoage_orig|levine_no_glucose|hema_integrated", clock))
+    filter(clock %in% clock_coverage$clock, n >= 20)
 
   if (nrow(traj) > 3) {
     p_traj <- ggplot(traj, aes(x = age_group, y = mean_adv,
