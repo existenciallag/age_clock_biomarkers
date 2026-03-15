@@ -74,7 +74,8 @@ df <- cohort %>%
     albumin = as.numeric(albumin),
     alp     = as.numeric(alp),
     glucose = as.numeric(glucose),
-    crp     = as.numeric(crp),
+    crp_raw = as.numeric(crp),
+    crp     = crp_raw / 10,                                   # mg/L → mg/dL (NHANES units)
     lncrp   = ifelse(is.na(crp) | crp <= 0, NA, log(crp)),
     creat   = as.numeric(creatinine),
     lncreat = ifelse(is.na(creat) | creat <= 0, NA, log(creat)),

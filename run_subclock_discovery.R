@@ -423,8 +423,12 @@ cat("#  SECTION 3: FAST vs SLOW AGER PROFILING                #\n")
 cat("##########################################################\n\n")
 
 # Use the best recentered clock (highest coverage)
-# Prefer local_z columns if available
-z_cols <- grep("_local_z$", names(scores), value = TRUE)
+# Prefer sexadj_z columns (adjusted for age + sex) over local_z (age only)
+z_cols <- grep("_sexadj_z$", names(scores), value = TRUE)
+if (length(z_cols) == 0) {
+  z_cols <- grep("_local_z$", names(scores), value = TRUE)
+  message(">> NOTE: No sex-adjusted Z-scores found, falling back to local_z (age-only)")
+}
 if (length(z_cols) == 0) {
   # Fallback to raw advancement
   z_cols <- grep("_advance$", names(scores), value = TRUE)
@@ -435,6 +439,8 @@ z_coverage <- sapply(z_cols, function(zc) sum(!is.na(scores[[zc]])))
 primary_z <- z_cols[which.max(z_coverage)]
 message(">> Primary Z-score for profiling: ", primary_z,
         " (n = ", max(z_coverage), ")")
+message(">> This Z-score is residualized for age",
+        ifelse(grepl("sexadj", primary_z), " AND sex", " only (not sex-adjusted)"))
 
 # Merge scores with raw biomarkers
 df <- merge(scores, raw[, c("patient_id", setdiff(names(raw),

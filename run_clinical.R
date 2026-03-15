@@ -103,10 +103,11 @@ df <- cohort %>%
     # 3. Glucose (mg/dL) — NOW AVAILABLE
     glucose = as.numeric(glucose),
 
-    # 4. CRP: raw mg/L → log(CRP)
-    #    New data has both 'crp' and 'log_crp'; use raw and compute log
-    crp   = as.numeric(crp),
-    lncrp = ifelse(is.na(crp) | crp <= 0, NA, log(crp)),
+    # 4. CRP: raw mg/L → convert to mg/dL (NHANES units) → log(CRP mg/dL)
+    #    Argentine lab reports CRP in mg/L; NHANES uses mg/dL (= mg/L / 10)
+    crp_raw = as.numeric(crp),
+    crp     = crp_raw / 10,                                   # mg/L → mg/dL
+    lncrp   = ifelse(is.na(crp) | crp <= 0, NA, log(crp)),
 
     # 5. Creatinine: mg/dL → log(creatinine mg/dL)
     creat   = as.numeric(creatinine),

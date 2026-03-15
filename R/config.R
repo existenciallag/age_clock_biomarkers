@@ -53,6 +53,7 @@ PANELS_SUB <- list(
   hepatic_enzime_insulin    = c("alp", "ggt", "insulin"),
   hepatic_lipid             = c("trig", "totchol"),
   hema_integrated           = c("rdw", "mcv", "rbc", "wbc", "lymph"),
+  hema_glucose              = c("rdw", "mcv", "rbc", "wbc", "lymph", "glucose"),
   micronutrient_methylation = c("vitaminB12", "hba1c", "rdw"),
   renal_A                   = c("lncreat", "bun"),
   # Levine-9 minus glucose — for cohorts lacking glucose data
@@ -67,6 +68,7 @@ PANEL_SYSTEM <- c(
   hepatic_enzime_insulin    = "Hepatic",
   hepatic_lipid             = "Hepatic",
   hema_integrated           = "Hematologic",
+  hema_glucose              = "Hematologic / Metabolic",
   micronutrient_methylation = "Micronutrient / Methylation",
   renal_A                   = "Renal",
   levine_no_glucose         = "Global (no Glucose)"
