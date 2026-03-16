@@ -56,30 +56,22 @@ PANEL_GLOBAL <- BIOMARKERS_PHENO_LEVINE
 #' All sub-clocks are trained as PhenoAge models on NHANES III.
 
 PANELS_SUB <- list(
-  # ── Existing sub-clocks ──
+  # ── Organ-specific sub-clocks ──
   hepatic_enzime_insulin    = c("alp", "ggt", "insulin"),
   hepatic_lipid             = c("trig", "totchol"),
   hema_integrated           = c("rdw", "mcv", "rbc", "wbc", "lymph"),
   hema_glucose              = c("rdw", "mcv", "rbc", "wbc", "lymph", "glucose"),
+  hema_glucose_log          = c("rdw", "mcv", "rbc", "wbc", "lymph", "lnglucose"),
   micronutrient_methylation = c("vitaminB12", "hba1c", "rdw"),
   renal_A                   = c("lncreat", "bun"),
+
+  # ── Global sub-clocks (Levine-like) ──
   levine_no_glucose         = c("albumin", "alp", "lncrp", "lncreat",
                                  "lymph", "mcv", "rdw", "wbc"),
 
-  # ── NEW: log(glucose) variant — compresses scale to avoid Gompertz overflow ──
-  hema_glucose_log          = c("rdw", "mcv", "rbc", "wbc", "lymph", "lnglucose"),
-
-  # ── NEW: metabolic + renal panel (NHANES biomarkers with good Argentine coverage) ──
-  metabolic_renal           = c("glucose", "bun", "uap", "totchol"),
-
-  # ── NEW: hema + metabolic combined ──
-  hema_metabolic            = c("rdw", "mcv", "rbc", "wbc", "lymph", "glucose", "bun"),
-
-  # ── NEW: max NHANES biomarkers (no albumin/CRP — scarce in Argentine data) ──
-  # Uses all NHANES-trainable biomarkers with high coverage in Argentine cohort
-  pheno_max_noalb           = c("alp", "glucose", "lncreat", "lymph",
-                                 "mcv", "rdw", "wbc", "bun", "uap",
-                                 "totchol", "hba1c")
+  # 6 of 9 Levine biomarkers with high Argentine coverage (~63%)
+  # Omits albumin (2.3%), alp (1.7%), lncrp (1.2%)
+  pheno_max_v2              = c("glucose", "lncreat", "lymph", "mcv", "rdw", "wbc")
 )
 
 # ── 3. System-level grouping ───────────────────────────────────────────────
@@ -90,13 +82,11 @@ PANEL_SYSTEM <- c(
   hepatic_lipid             = "Hepatic",
   hema_integrated           = "Hematologic",
   hema_glucose              = "Hematologic / Metabolic",
+  hema_glucose_log          = "Hematologic / Metabolic",
   micronutrient_methylation = "Micronutrient / Methylation",
   renal_A                   = "Renal",
   levine_no_glucose         = "Global (no Glucose)",
-  hema_glucose_log          = "Hematologic / Metabolic",
-  metabolic_renal           = "Metabolic / Renal",
-  hema_metabolic            = "Hematologic / Metabolic",
-  pheno_max_noalb           = "Global (max biomarkers)"
+  pheno_max_v2              = "Global (Levine 6/9)"
 )
 
 # ── 4. Published Levine 2018 PhenoAge coefficients ────────────────────────
