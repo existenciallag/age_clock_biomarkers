@@ -882,6 +882,163 @@ for (zc in z_cols) {
   }
 }
 
+# ── 4d-bis. FULL biomarker profile using pheno_max_v2 as classifier ──
+
+cat("\n##########################################################\n")
+cat("#  FULL BIOMARKER PROFILE — pheno_max_v2 classifier      #\n")
+cat("##########################################################\n\n")
+
+maxv2_z <- "pheno_pheno_max_v2_sexadj_z"
+if (!maxv2_z %in% names(prof_df)) maxv2_z <- "pheno_pheno_max_v2_local_z"
+
+if (maxv2_z %in% names(prof_df)) {
+  z_v2 <- prof_df[[maxv2_z]]
+  ok_v2 <- !is.na(z_v2) & is.finite(z_v2)
+  n_v2 <- sum(ok_v2)
+  message(">> pheno_max_v2 classifier: ", n_v2, " subjects")
+
+  # Quintile classification
+  qts_v2 <- quantile(z_v2[ok_v2], probs = c(0.10, 0.25, 0.75, 0.90), na.rm = TRUE)
+  prof_df$ager_maxv2 <- NA_character_
+  prof_df$ager_maxv2[ok_v2] <- as.character(cut(z_v2[ok_v2],
+    breaks = c(-Inf, qts_v2[1], qts_v2[2], qts_v2[3], qts_v2[4], Inf),
+    labels = c("P1_very_slow", "P2_slow", "P3_average", "P4_fast", "P5_very_fast")
+  ))
+
+  cat("--- Ager Groups (pheno_max_v2) ---\n\n")
+  tbl_v2 <- table(prof_df$ager_maxv2[ok_v2])
+  for (g in names(tbl_v2))
+    cat(sprintf("   %-15s n = %6d (%5.1f%%)\n", g, tbl_v2[g], 100 * tbl_v2[g] / n_v2))
+
+  # Full profiling
+  v2_valid <- prof_df[ok_v2, ]
+  v2_results <- list()
+
+  for (bm in usable_bm) {
+    x <- v2_valid[[bm]]
+    g <- v2_valid$ager_maxv2
+    ok_bm <- !is.na(x) & is.finite(x) & !is.na(g)
+    if (sum(ok_bm) < 30) next
+
+    kw <- tryCatch(kruskal.test(x[ok_bm] ~ factor(g[ok_bm])), error = function(e) NULL)
+    ct <- cor.test(z_v2[ok_v2][ok_bm], x[ok_bm], method = "spearman")
+
+    p1 <- x[ok_bm & g == "P1_very_slow"]
+    p5 <- x[ok_bm & g == "P5_very_fast"]
+    cohens_d <- NA
+    if (length(p1) >= 5 && length(p5) >= 5) {
+      pooled_sd <- sqrt((var(p1) * (length(p1) - 1) + var(p5) * (length(p5) - 1)) /
+                        (length(p1) + length(p5) - 2))
+      if (pooled_sd > 0) cohens_d <- (mean(p5) - mean(p1)) / pooled_sd
+    }
+
+    v2_results[[bm]] <- data.frame(
+      biomarker  = bm,
+      n_total    = sum(ok_bm),
+      rho_z      = round(ct$estimate, 4),
+      rho_p      = ct$p.value,
+      kw_chi2    = if (!is.null(kw)) round(kw$statistic, 2) else NA,
+      kw_p       = if (!is.null(kw)) kw$p.value else NA,
+      d_P5_vs_P1 = round(cohens_d, 3),
+      mean_P1    = if (length(p1) >= 5) round(mean(p1), 3) else NA,
+      mean_P5    = if (length(p5) >= 5) round(mean(p5), 3) else NA,
+      direction  = ifelse(!is.na(cohens_d),
+                          ifelse(cohens_d > 0.1, "HIGHER_in_fast",
+                          ifelse(cohens_d < -0.1, "LOWER_in_fast", "~equal")),
+                          NA),
+      stringsAsFactors = FALSE, row.names = NULL
+    )
+  }
+
+  if (length(v2_results) > 0) {
+    v2_table <- do.call(rbind, v2_results)
+    v2_table$rho_padj <- p.adjust(v2_table$rho_p, method = "BH")
+    v2_table$kw_padj  <- p.adjust(v2_table$kw_p, method = "BH")
+    v2_table <- v2_table[order(-abs(v2_table$d_P5_vs_P1)), ]
+    rownames(v2_table) <- NULL
+
+    sig_v2 <- v2_table[!is.na(v2_table$d_P5_vs_P1) &
+                        abs(v2_table$d_P5_vs_P1) > 0.1, ]
+    if (nrow(sig_v2) > 0) {
+      cat("\n  Biomarkers differentiating fast vs slow agers (pheno_max_v2, |d| > 0.1):\n\n")
+      print(sig_v2[, c("biomarker", "n_total", "rho_z", "d_P5_vs_P1",
+                        "mean_P1", "mean_P5", "direction", "kw_padj")],
+            row.names = FALSE)
+    }
+
+    write.csv(v2_table, file.path(OUTPUT_DIR, "step4_maxv2_biomarker_profiles.csv"),
+              row.names = FALSE)
+    message(">> Saved: step4_maxv2_biomarker_profiles.csv")
+
+    # Heatmap for pheno_max_v2
+    sig_bm_v2 <- v2_table$biomarker[
+      !is.na(v2_table$d_P5_vs_P1) &
+      abs(v2_table$d_P5_vs_P1) > 0.15 &
+      !is.na(v2_table$kw_padj) &
+      v2_table$kw_padj < 0.05
+    ]
+
+    if (length(sig_bm_v2) >= 3) {
+      radar_v2 <- list()
+      for (bm in sig_bm_v2) {
+        if (!bm %in% names(v2_valid)) next
+        x <- v2_valid[[bm]]
+        ok_bm <- !is.na(x) & is.finite(x) & !is.na(v2_valid$ager_maxv2)
+        if (sum(ok_bm) < 30) next
+
+        x_z <- (x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE)
+        group_means <- tapply(x_z[ok_bm], v2_valid$ager_maxv2[ok_bm], mean)
+        for (g in names(group_means)) {
+          radar_v2[[length(radar_v2) + 1]] <- data.frame(
+            biomarker = bm, group = g, mean_z = round(group_means[g], 3),
+            stringsAsFactors = FALSE, row.names = NULL
+          )
+        }
+      }
+
+      if (length(radar_v2) > 0) {
+        radar_v2_df <- do.call(rbind, radar_v2)
+        radar_v2_wide <- pivot_wider(radar_v2_df, names_from = group, values_from = mean_z)
+        write.csv(radar_v2_wide, file.path(OUTPUT_DIR, "step4_maxv2_aging_signature.csv"),
+                  row.names = FALSE)
+
+        radar_v2_df$group <- factor(radar_v2_df$group,
+          levels = c("P1_very_slow", "P2_slow", "P3_average", "P4_fast", "P5_very_fast"))
+
+        bm_ord_v2 <- radar_v2_df %>%
+          filter(group %in% c("P1_very_slow", "P5_very_fast")) %>%
+          pivot_wider(names_from = group, values_from = mean_z) %>%
+          mutate(diff = P5_very_fast - P1_very_slow) %>%
+          arrange(diff)
+        radar_v2_df$biomarker <- factor(radar_v2_df$biomarker, levels = bm_ord_v2$biomarker)
+
+        p_v2 <- ggplot(radar_v2_df, aes(x = group, y = biomarker, fill = mean_z)) +
+          geom_tile(colour = "white", linewidth = 0.5) +
+          geom_text(aes(label = sprintf("%.2f", mean_z)), size = 3) +
+          scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick",
+                               midpoint = 0, name = "Mean Z") +
+          theme_minimal(base_size = 12) +
+          theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+          labs(title = "Accelerated Aging Signature (pheno_max_v2 classifier)",
+               subtitle = sprintf("6/9 Levine biomarkers — n = %s",
+                                   format(n_v2, big.mark = ",")),
+               x = "Ager Group", y = "Biomarker")
+
+        ggsave(file.path(OUTPUT_DIR, "step4_maxv2_aging_signature_heatmap.png"),
+               p_v2, width = 10, height = max(6, length(sig_bm_v2) * 0.35 + 2),
+               dpi = 150)
+        print(p_v2)
+        message(">> Saved: step4_maxv2_aging_signature_heatmap.png")
+
+        cat("\n--- Accelerated Aging Signature (pheno_max_v2) ---\n\n")
+        print(as.data.frame(radar_v2_wide), row.names = FALSE)
+      }
+    }
+  }
+} else {
+  message(">> pheno_max_v2 Z-score not found — skipping")
+}
+
 # ── 4e. Biomarker profiles by age decade and sex ──
 
 cat("\n--- Biomarker Trends by Age Decade & Sex ---\n\n")
