@@ -65,26 +65,46 @@ message(">> Rows: ", nrow(cohort))
 
 message(">> Transforming biomarkers...")
 
+# IMPORTANT: BioAge::phenoage_nhanes() internally converts to SI units before
+# training (see mutate inside phenoage_nhanes: albumin=albumin_gL,
+# glucose=glucose_mmol, creat=creat_umol, lncreat=lncreat_umol).
+# Therefore, fitted model coefficients expect SI units.
+# We MUST convert Argentine lab values to match.
+
 df <- cohort %>%
   mutate(
     patient_id = Protocolo,
     age = as.numeric(age),
 
-    # Levine 9 biomarkers (NHANES naming)
-    albumin = as.numeric(albumin),
+    # ── Unit conversions to match BioAge SI training units ──
+    # albumin: Argentine = g/dL → BioAge model expects g/L (×10)
+    albumin = as.numeric(albumin) * 10,
+
+    # alp: U/L in both (no conversion needed)
     alp     = as.numeric(alp),
-    glucose = as.numeric(glucose),
+
+    # glucose: Argentine = mg/dL → BioAge model expects mmol/L (÷18.0)
+    glucose = as.numeric(glucose) / 18.0,
+
+    # CRP: Argentine = mg/L → BioAge expects mg/dL (÷10), then log
     crp_raw = as.numeric(crp),
-    crp     = crp_raw / 10,                                   # mg/L → mg/dL (NHANES units)
+    crp     = crp_raw / 10,
     lncrp   = ifelse(is.na(crp) | crp <= 0, NA, log(crp)),
-    creat   = as.numeric(creatinine),
+
+    # creatinine: Argentine = mg/dL → BioAge model expects μmol/L (×88.4)
+    creat   = as.numeric(creatinine) * 88.4,
     lncreat = ifelse(is.na(creat) | creat <= 0, NA, log(creat)),
+
+    # lymphocyte %: same units
     lymph   = as.numeric(lymphocyte),
+    # MCV in fL: same units
     mcv     = as.numeric(mcv),
+    # RDW in %: same units
     rdw     = as.numeric(rdw),
+    # WBC in 1000 cells/μL: same units (auto-correct if reported as cells/μL)
     wbc     = ifelse(as.numeric(wbc) > 300, as.numeric(wbc) / 1000, as.numeric(wbc)),
 
-    # Sub-clock biomarkers
+    # ── Sub-clock biomarkers (no unit conversion needed) ──
     rbc        = as.numeric(rbc),
     rbc        = ifelse(rbc > 100, rbc / 1e6, rbc),
     ggt        = as.numeric(ggt),
@@ -95,7 +115,10 @@ df <- cohort %>%
     vitaminB12 = as.numeric(vitamin_b12),
     bun        = as.numeric(bun),
     uap        = as.numeric(uric_acid),
-    gender     = ifelse(sex == "M", 1, 2)
+    gender     = ifelse(sex == "M", 1, 2),
+
+    # ── Derived: log(glucose) for hema_glucose_log sub-clock ──
+    lnglucose  = ifelse(is.na(glucose) | glucose <= 0, NA, log(glucose))
   )
 
 # Filter invalid ages
@@ -115,7 +138,7 @@ message(strrep("=", 60))
 all_bm <- c("albumin", "alp", "glucose", "lncrp", "lncreat",
             "lymph", "mcv", "rdw", "wbc",
             "rbc", "ggt", "insulin", "trig", "totchol",
-            "vitaminB12", "hba1c", "bun")
+            "vitaminB12", "hba1c", "bun", "uap", "lnglucose")
 for (v in all_bm) {
   if (v %in% names(df)) {
     n_ok <- sum(!is.na(df[[v]]))
