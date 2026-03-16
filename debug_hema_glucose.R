@@ -3,13 +3,12 @@
 library(BioAge)
 library(dplyr)
 
-PROJECT_ROOT <- "/home/user/age_clock_biomarkers"
-setwd(PROJECT_ROOT)
-source("R/config.R")
-source("R/export.R")
+PROJECT_ROOT <- getwd()
+source(file.path(PROJECT_ROOT, "R/config.R"))
+source(file.path(PROJECT_ROOT, "R/export.R"))
 
 # Load bundle
-bundle <- load_bundle("bioage_deployment_bundle.rds")
+bundle <- load_bundle(file.path(PROJECT_ROOT, "bioage_deployment_bundle.rds"))
 fit <- bundle$subclock_models$hema_glucose
 
 # 1. Print model coefficients
