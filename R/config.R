@@ -16,16 +16,22 @@
 #' Original Levine 2018 PhenoAge: 9 biomarkers
 #' (chronological age is added by the algorithm, not listed here)
 #'
-#' Units in NHANES:
-#'   albumin    = g/dL
-#'   alp        = U/L  (alkaline phosphatase)
-#'   glucose    = mg/dL (serum glucose)
+#' Units AFTER BioAge::phenoage_nhanes() internal conversion (SI):
+#'   albumin    = g/L   (phenoage_nhanes converts: albumin = albumin_gL)
+#'   alp        = U/L   (alkaline phosphatase, no conversion)
+#'   glucose    = mmol/L (phenoage_nhanes converts: glucose = glucose_mmol)
 #'   lncrp      = log(CRP mg/dL)
-#'   lncreat    = log(creatinine mg/dL)
+#'   lncreat    = log(creatinine μmol/L) (phenoage_nhanes: lncreat = lncreat_umol)
 #'   lymph      = lymphocyte %
 #'   mcv        = fL   (mean cell volume)
 #'   rdw        = %    (red cell distribution width)
 #'   wbc        = 1000 cells/uL
+#'
+#' IMPORTANT: When scoring new patients, convert to these SI units BEFORE
+#' passing to phenoage_calc(). The Argentine dataset uses:
+#'   albumin: g/dL × 10 → g/L
+#'   glucose: mg/dL ÷ 18.0 → mmol/L
+#'   creatinine: mg/dL × 88.4 → μmol/L; then log() for lncreat
 BIOMARKERS_PHENO_LEVINE <- c(
   "albumin", "alp", "glucose", "lncrp", "lncreat",
   "lymph", "mcv", "rdw", "wbc"
@@ -50,15 +56,30 @@ PANEL_GLOBAL <- BIOMARKERS_PHENO_LEVINE
 #' All sub-clocks are trained as PhenoAge models on NHANES III.
 
 PANELS_SUB <- list(
+  # ── Existing sub-clocks ──
   hepatic_enzime_insulin    = c("alp", "ggt", "insulin"),
   hepatic_lipid             = c("trig", "totchol"),
   hema_integrated           = c("rdw", "mcv", "rbc", "wbc", "lymph"),
   hema_glucose              = c("rdw", "mcv", "rbc", "wbc", "lymph", "glucose"),
   micronutrient_methylation = c("vitaminB12", "hba1c", "rdw"),
   renal_A                   = c("lncreat", "bun"),
-  # Levine-9 minus glucose — for cohorts lacking glucose data
   levine_no_glucose         = c("albumin", "alp", "lncrp", "lncreat",
-                                 "lymph", "mcv", "rdw", "wbc")
+                                 "lymph", "mcv", "rdw", "wbc"),
+
+  # ── NEW: log(glucose) variant — compresses scale to avoid Gompertz overflow ──
+  hema_glucose_log          = c("rdw", "mcv", "rbc", "wbc", "lymph", "lnglucose"),
+
+  # ── NEW: metabolic + renal panel (NHANES biomarkers with good Argentine coverage) ──
+  metabolic_renal           = c("glucose", "bun", "uap", "totchol"),
+
+  # ── NEW: hema + metabolic combined ──
+  hema_metabolic            = c("rdw", "mcv", "rbc", "wbc", "lymph", "glucose", "bun"),
+
+  # ── NEW: max NHANES biomarkers (no albumin/CRP — scarce in Argentine data) ──
+  # Uses all NHANES-trainable biomarkers with high coverage in Argentine cohort
+  pheno_max_noalb           = c("alp", "glucose", "lncreat", "lymph",
+                                 "mcv", "rdw", "wbc", "bun", "uap",
+                                 "totchol", "hba1c")
 )
 
 # ── 3. System-level grouping ───────────────────────────────────────────────
@@ -71,7 +92,11 @@ PANEL_SYSTEM <- c(
   hema_glucose              = "Hematologic / Metabolic",
   micronutrient_methylation = "Micronutrient / Methylation",
   renal_A                   = "Renal",
-  levine_no_glucose         = "Global (no Glucose)"
+  levine_no_glucose         = "Global (no Glucose)",
+  hema_glucose_log          = "Hematologic / Metabolic",
+  metabolic_renal           = "Metabolic / Renal",
+  hema_metabolic            = "Hematologic / Metabolic",
+  pheno_max_noalb           = "Global (max biomarkers)"
 )
 
 # ── 4. Published Levine 2018 PhenoAge coefficients ────────────────────────

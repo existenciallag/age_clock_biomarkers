@@ -71,8 +71,10 @@ train_all_clocks <- function(panels_sub = PANELS_SUB,
 
   for (nm in names(panels_sub)) {
     bm <- panels_sub[[nm]]
+    if (verbose) message("   Training sub-clock: ", nm,
+                         " [", paste(bm, collapse=", "), "]")
     clock <- tryCatch(
-      BioAge::phenoage_nhanes(bm),
+      phenoage_nhanes_extended(bm),
       error = function(e) {
         if (verbose) message("   ! Sub-clock '", nm, "' failed: ", e$message)
         NULL
@@ -97,6 +99,67 @@ train_all_clocks <- function(panels_sub = PANELS_SUB,
   result
 }
 
+# ── Custom phenoage_nhanes with derived variables ─────────────────────────
+
+#' Extended phenoage_nhanes that adds derived columns to NHANES data
+#'
+#' The standard BioAge::phenoage_nhanes() only creates albumin (g/L),
+#' glucose (mmol/L), creat (μmol/L), lncreat (log μmol/L).
+#' This wrapper adds additional derived variables (e.g., lnglucose)
+#' so sub-clocks can use log-transformed biomarkers.
+#'
+#' @param biomarkers Character vector of biomarker names.
+#' @return Same structure as BioAge::phenoage_nhanes().
+phenoage_nhanes_extended <- function(biomarkers) {
+
+  # Derived variables that need custom NHANES columns
+  needs_custom <- any(biomarkers %in% c("lnglucose"))
+
+  if (!needs_custom) {
+    # Standard path — no custom columns needed
+    return(BioAge::phenoage_nhanes(biomarkers))
+  }
+
+  # Custom path: replicate phenoage_nhanes logic with extra mutate steps
+  train <- BioAge::phenoage_calc(
+    data = BioAge::NHANES3 %>%
+      dplyr::filter(age >= 20 & age <= 84) %>%
+      dplyr::mutate(
+        albumin   = albumin_gL,
+        glucose   = glucose_mmol,
+        creat     = creat_umol,
+        lncreat   = lncreat_umol,
+        lnglucose = ifelse(glucose_mmol > 0, log(glucose_mmol), NA)
+      ),
+    biomarkers = biomarkers,
+    fit = NULL
+  )
+
+  test <- BioAge::phenoage_calc(
+    data = BioAge::NHANES4 %>%
+      dplyr::filter(age >= 20) %>%
+      dplyr::mutate(
+        albumin   = albumin_gL,
+        glucose   = glucose_mmol,
+        creat     = creat_umol,
+        lncreat   = lncreat_umol,
+        lnglucose = ifelse(glucose_mmol > 0, log(glucose_mmol), NA)
+      ),
+    biomarkers = biomarkers,
+    fit = train$fit
+  )
+
+  dat <- dplyr::left_join(
+    BioAge::NHANES4,
+    test$data[, c("sampleID", "phenoage", "phenoage_advance")],
+    by = "sampleID"
+  )
+
+  result <- list(data = dat, fit = train$fit)
+  class(result) <- append(class(result), "phenoage")
+  result
+}
+
 # ── Convenience: train a single custom sub-clock ───────────────────────────
 
 #' Train a single PhenoAge sub-clock
@@ -106,7 +169,7 @@ train_all_clocks <- function(panels_sub = PANELS_SUB,
 #' @return BioAge phenoage_nhanes result, or NULL on failure.
 train_subclock <- function(biomarkers, name = "custom") {
   tryCatch(
-    BioAge::phenoage_nhanes(biomarkers),
+    phenoage_nhanes_extended(biomarkers),
     error = function(e) {
       message("Sub-clock '", name, "' failed: ", e$message)
       NULL
