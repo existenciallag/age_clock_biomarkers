@@ -229,6 +229,28 @@ message(">> After age filter: ", nrow(df), " rows")
 message(">> Age: ", round(mean(df$age, na.rm = TRUE), 1), " ± ",
         round(sd(df$age, na.rm = TRUE), 1), " years")
 
+# ── 2a-bis. Derived biomarkers: NLR and HOMA-IR ──
+
+# NLR = Neutrophil-to-Lymphocyte Ratio (works with % or absolute)
+df$nlr <- ifelse(!is.na(df$neutrophils) & !is.na(df$lymphocyte) &
+                 df$lymphocyte > 0,
+                 as.numeric(df$neutrophils) / as.numeric(df$lymphocyte), NA)
+
+# HOMA-IR = (glucose_mg_dL × insulin_μU_mL) / 405
+# glucose was already converted to mmol/L above, so use original column
+glucose_mg <- suppressWarnings(as.numeric(cohort$glucose[match(df$patient_id, cohort$Protocolo)]))
+insulin_raw <- df$insulin
+df$homa_ir <- ifelse(!is.na(glucose_mg) & !is.na(insulin_raw) &
+                     glucose_mg > 0 & insulin_raw > 0,
+                     (glucose_mg * insulin_raw) / 405, NA)
+
+n_nlr  <- sum(!is.na(df$nlr))
+n_homa <- sum(!is.na(df$homa_ir))
+message(">> NLR:     ", format(n_nlr, big.mark = ","), " valid values (",
+        round(100 * n_nlr / nrow(df), 1), "%)")
+message(">> HOMA-IR: ", format(n_homa, big.mark = ","), " valid values (",
+        round(100 * n_homa / nrow(df), 1), "%)")
+
 # ── 2b. Biomarker availability ──
 
 cat("\n--- Biomarker Availability ---\n\n")
@@ -265,6 +287,8 @@ results <- data.frame(
   patient_id = df$patient_id,
   age        = df$age,
   sex        = df$sex,
+  nlr        = df$nlr,
+  homa_ir    = df$homa_ir,
   stringsAsFactors = FALSE
 )
 
@@ -749,7 +773,8 @@ all_biomarkers <- c(
   "crp", "fibrinogen", "homocysteine",
   "TSH", "free_t4",
   "vitamin_d", "vitamin_b12",
-  "wbc", "rbc", "mcv", "rdw", "lymphocyte"
+  "wbc", "rbc", "mcv", "rdw", "lymphocyte",
+  "nlr", "homa_ir"
 )
 all_biomarkers <- intersect(all_biomarkers, names(prof_df))
 for (bm in all_biomarkers) prof_df[[bm]] <- suppressWarnings(as.numeric(prof_df[[bm]]))
