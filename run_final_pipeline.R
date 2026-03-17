@@ -224,7 +224,7 @@ df <- cohort %>%
     lnglucose  = ifelse(is.na(glucose) | glucose <= 0, NA, log(glucose))
   )
 
-df <- df[!is.na(df$age) & df$age >= 1 & df$age <= 120, ]
+df <- df[!is.na(df$age) & df$age >= 18 & df$age <= 120, ]
 message(">> After age filter: ", nrow(df), " rows")
 message(">> Age: ", round(mean(df$age, na.rm = TRUE), 1), " ± ",
         round(sd(df$age, na.rm = TRUE), 1), " years")
@@ -728,7 +728,7 @@ message(">> Primary Z-score for profiling: ", primary_z,
 raw <- cohort
 raw$patient_id <- raw$Protocolo
 raw$age <- as.numeric(raw$age)
-raw <- raw[!is.na(raw$age) & raw$age >= 1 & raw$age <= 120, ]
+raw <- raw[!is.na(raw$age) & raw$age >= 18 & raw$age <= 120, ]
 
 # Merge recentered scores with raw biomarkers
 prof_df <- merge(rc, raw[, c("patient_id", setdiff(names(raw),
@@ -797,25 +797,33 @@ for (bm in usable_bm) {
 
   p1 <- x[ok_bm & g == "P1_very_slow"]
   p5 <- x[ok_bm & g == "P5_very_fast"]
-  cohens_d <- NA
-  if (length(p1) >= 5 && length(p5) >= 5) {
-    pooled_sd <- sqrt((var(p1) * (length(p1) - 1) + var(p5) * (length(p5) - 1)) /
-                      (length(p1) + length(p5) - 2))
-    if (pooled_sd > 0) cohens_d <- (mean(p5) - mean(p1)) / pooled_sd
+  cohens_d <- NA; d_ci_lo <- NA; d_ci_hi <- NA
+  n1 <- length(p1); n5 <- length(p5)
+  if (n1 >= 5 && n5 >= 5) {
+    pooled_sd <- sqrt((var(p1) * (n1 - 1) + var(p5) * (n5 - 1)) / (n1 + n5 - 2))
+    if (pooled_sd > 0) {
+      cohens_d <- (mean(p5) - mean(p1)) / pooled_sd
+      # Analytical SE: Hedges & Olkin (1985)
+      se_d <- sqrt((n1 + n5) / (n1 * n5) + cohens_d^2 / (2 * (n1 + n5)))
+      d_ci_lo <- cohens_d - 1.96 * se_d
+      d_ci_hi <- cohens_d + 1.96 * se_d
+    }
   }
 
   profile_results[[bm]] <- data.frame(
     biomarker  = bm,
     n_total    = sum(ok_bm),
-    n_P1       = length(p1),
-    n_P5       = length(p5),
+    n_P1       = n1,
+    n_P5       = n5,
     rho_z      = round(ct$estimate, 4),
     rho_p      = ct$p.value,
     kw_chi2    = if (!is.null(kw)) round(kw$statistic, 2) else NA,
     kw_p       = if (!is.null(kw)) kw$p.value else NA,
     d_P5_vs_P1 = round(cohens_d, 3),
-    mean_P1    = if (length(p1) >= 5) round(mean(p1), 3) else NA,
-    mean_P5    = if (length(p5) >= 5) round(mean(p5), 3) else NA,
+    d_ci_lo    = round(d_ci_lo, 3),
+    d_ci_hi    = round(d_ci_hi, 3),
+    mean_P1    = if (n1 >= 5) round(mean(p1), 3) else NA,
+    mean_P5    = if (n5 >= 5) round(mean(p5), 3) else NA,
     direction  = ifelse(!is.na(cohens_d),
                         ifelse(cohens_d > 0.1, "HIGHER_in_fast",
                         ifelse(cohens_d < -0.1, "LOWER_in_fast", "~equal")),
@@ -837,7 +845,7 @@ if (length(profile_results) > 0) {
   if (nrow(sig) > 0) {
     cat("  Significantly differentiating biomarkers (|d| > 0.1):\n\n")
     print(sig[, c("biomarker", "n_total", "n_P1", "n_P5", "rho_z", "d_P5_vs_P1",
-                   "mean_P1", "mean_P5", "direction", "kw_padj")],
+                   "d_ci_lo", "d_ci_hi", "mean_P1", "mean_P5", "direction", "kw_padj")],
           row.names = FALSE)
   }
 
@@ -1015,25 +1023,32 @@ if (maxv2_z %in% names(prof_df)) {
 
     p1 <- x[ok_bm & g == "P1_very_slow"]
     p5 <- x[ok_bm & g == "P5_very_fast"]
-    cohens_d <- NA
-    if (length(p1) >= 5 && length(p5) >= 5) {
-      pooled_sd <- sqrt((var(p1) * (length(p1) - 1) + var(p5) * (length(p5) - 1)) /
-                        (length(p1) + length(p5) - 2))
-      if (pooled_sd > 0) cohens_d <- (mean(p5) - mean(p1)) / pooled_sd
+    cohens_d <- NA; d_ci_lo <- NA; d_ci_hi <- NA
+    n1 <- length(p1); n5 <- length(p5)
+    if (n1 >= 5 && n5 >= 5) {
+      pooled_sd <- sqrt((var(p1) * (n1 - 1) + var(p5) * (n5 - 1)) / (n1 + n5 - 2))
+      if (pooled_sd > 0) {
+        cohens_d <- (mean(p5) - mean(p1)) / pooled_sd
+        se_d <- sqrt((n1 + n5) / (n1 * n5) + cohens_d^2 / (2 * (n1 + n5)))
+        d_ci_lo <- cohens_d - 1.96 * se_d
+        d_ci_hi <- cohens_d + 1.96 * se_d
+      }
     }
 
     v2_results[[bm]] <- data.frame(
       biomarker  = bm,
       n_total    = sum(ok_bm),
-      n_P1       = length(p1),
-      n_P5       = length(p5),
+      n_P1       = n1,
+      n_P5       = n5,
       rho_z      = round(ct$estimate, 4),
       rho_p      = ct$p.value,
       kw_chi2    = if (!is.null(kw)) round(kw$statistic, 2) else NA,
       kw_p       = if (!is.null(kw)) kw$p.value else NA,
       d_P5_vs_P1 = round(cohens_d, 3),
-      mean_P1    = if (length(p1) >= 5) round(mean(p1), 3) else NA,
-      mean_P5    = if (length(p5) >= 5) round(mean(p5), 3) else NA,
+      d_ci_lo    = round(d_ci_lo, 3),
+      d_ci_hi    = round(d_ci_hi, 3),
+      mean_P1    = if (n1 >= 5) round(mean(p1), 3) else NA,
+      mean_P5    = if (n5 >= 5) round(mean(p5), 3) else NA,
       direction  = ifelse(!is.na(cohens_d),
                           ifelse(cohens_d > 0.1, "HIGHER_in_fast",
                           ifelse(cohens_d < -0.1, "LOWER_in_fast", "~equal")),
@@ -1054,7 +1069,7 @@ if (maxv2_z %in% names(prof_df)) {
     if (nrow(sig_v2) > 0) {
       cat("\n  Biomarkers differentiating fast vs slow agers (pheno_max_v2, |d| > 0.1):\n\n")
       print(sig_v2[, c("biomarker", "n_total", "n_P1", "n_P5", "rho_z", "d_P5_vs_P1",
-                        "mean_P1", "mean_P5", "direction", "kw_padj")],
+                        "d_ci_lo", "d_ci_hi", "mean_P1", "mean_P5", "direction", "kw_padj")],
             row.names = FALSE)
     }
 
