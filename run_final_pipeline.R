@@ -366,6 +366,94 @@ if (length(arg_perf) > 0) {
   message(">> Saved: step2_argentina_performance.csv")
 }
 
+# ── 2d-bis. RMSE by Age Group (Argentine Cohort) ──
+
+cat("\n--- RMSE by Age Group (Argentine Cohort) ---\n\n")
+
+age_breaks  <- c(0, 30, 40, 50, 60, 70, 80, 120)
+age_labels  <- c("<30", "30-39", "40-49", "50-59", "60-69", "70-79", "80+")
+results$age_group_rmse <- cut(results$age, breaks = age_breaks, labels = age_labels,
+                              right = FALSE)
+
+rmse_by_age <- list()
+for (bc in ba_cols_arg) {
+  vals <- results[[bc]]
+  ages <- results$age
+  grp  <- results$age_group_rmse
+  for (ag in age_labels) {
+    ok <- !is.na(vals) & is.finite(vals) & !is.na(ages) & !is.na(grp) & grp == ag
+    n_ok <- sum(ok)
+    if (n_ok < 10) next
+    resid <- vals[ok] - ages[ok]
+    rmse_val  <- sqrt(mean(resid^2))
+    mae_val   <- mean(abs(resid))
+    r_val     <- cor(ages[ok], vals[ok])
+    bias_val  <- mean(resid)
+    rmse_by_age[[paste0(bc, "_", ag)]] <- data.frame(
+      clock     = bc,
+      age_group = ag,
+      n         = n_ok,
+      RMSE      = round(rmse_val, 2),
+      MAE       = round(mae_val, 2),
+      bias      = round(bias_val, 2),
+      r         = round(r_val, 4),
+      stringsAsFactors = FALSE, row.names = NULL
+    )
+  }
+}
+
+if (length(rmse_by_age) > 0) {
+  rmse_age_table <- do.call(rbind, rmse_by_age)
+  rownames(rmse_age_table) <- NULL
+
+  # Print per clock
+  for (bc in ba_cols_arg) {
+    sub_t <- rmse_age_table[rmse_age_table$clock == bc, ]
+    if (nrow(sub_t) == 0) next
+    cat(sprintf("\n  %s:\n", bc))
+    cat(sprintf("    %-8s %6s %7s %7s %7s %7s\n", "Age", "n", "RMSE", "MAE", "Bias", "r"))
+    for (i in seq_len(nrow(sub_t))) {
+      r <- sub_t[i, ]
+      cat(sprintf("    %-8s %6d %7.2f %7.2f %7.2f %7.4f\n",
+                  r$age_group, r$n, r$RMSE, r$MAE, r$bias, r$r))
+    }
+    # Highlight worst RMSE group
+    worst <- sub_t[which.max(sub_t$RMSE), ]
+    best  <- sub_t[which.min(sub_t$RMSE), ]
+    cat(sprintf("    >> Worst RMSE: %s (%.2f)  |  Best RMSE: %s (%.2f)\n",
+                worst$age_group, worst$RMSE, best$age_group, best$RMSE))
+  }
+
+  write.csv(rmse_age_table, file.path(OUTPUT_DIR, "step2_rmse_by_age_group.csv"),
+            row.names = FALSE)
+  message(">> Saved: step2_rmse_by_age_group.csv")
+
+  # Plot: RMSE by age group per clock
+  for (bc in unique(rmse_age_table$clock)) {
+    sub_t <- rmse_age_table[rmse_age_table$clock == bc, ]
+    if (nrow(sub_t) < 3) next
+    label <- gsub("pheno_", "", bc)
+    sub_t$age_group <- factor(sub_t$age_group, levels = age_labels)
+
+    p_rmse <- ggplot(sub_t, aes(x = age_group, y = RMSE)) +
+      geom_col(fill = "steelblue", alpha = 0.8, width = 0.6) +
+      geom_text(aes(label = sprintf("%.1f", RMSE)), vjust = -0.5, size = 3.5) +
+      geom_line(aes(x = as.numeric(age_group), y = RMSE),
+                colour = "darkred", linewidth = 0.8, linetype = "dashed") +
+      theme_minimal(base_size = 13) +
+      labs(title = paste0("RMSE by Age Group — ", label),
+           subtitle = sprintf("n per group shown below bars"),
+           x = "Age Group", y = "RMSE (years)") +
+      geom_text(aes(label = paste0("n=", format(n, big.mark = ",")), y = 0),
+                vjust = 1.5, size = 2.8, colour = "grey40")
+    print(p_rmse)
+
+    fn <- file.path(OUTPUT_DIR, paste0("step2_rmse_by_age_", label, ".png"))
+    ggsave(fn, p_rmse, width = 8, height = 5, dpi = 150)
+  }
+  message(">> Saved: RMSE by age group plots")
+}
+
 # ── 2e. Argentine scatter plots (BA vs CA) ──
 
 for (bc in ba_cols_arg) {
@@ -719,6 +807,8 @@ for (bm in usable_bm) {
   profile_results[[bm]] <- data.frame(
     biomarker  = bm,
     n_total    = sum(ok_bm),
+    n_P1       = length(p1),
+    n_P5       = length(p5),
     rho_z      = round(ct$estimate, 4),
     rho_p      = ct$p.value,
     kw_chi2    = if (!is.null(kw)) round(kw$statistic, 2) else NA,
@@ -746,7 +836,7 @@ if (length(profile_results) > 0) {
                        abs(profile_table$d_P5_vs_P1) > 0.1, ]
   if (nrow(sig) > 0) {
     cat("  Significantly differentiating biomarkers (|d| > 0.1):\n\n")
-    print(sig[, c("biomarker", "n_total", "rho_z", "d_P5_vs_P1",
+    print(sig[, c("biomarker", "n_total", "n_P1", "n_P5", "rho_z", "d_P5_vs_P1",
                    "mean_P1", "mean_P5", "direction", "kw_padj")],
           row.names = FALSE)
   }
@@ -935,6 +1025,8 @@ if (maxv2_z %in% names(prof_df)) {
     v2_results[[bm]] <- data.frame(
       biomarker  = bm,
       n_total    = sum(ok_bm),
+      n_P1       = length(p1),
+      n_P5       = length(p5),
       rho_z      = round(ct$estimate, 4),
       rho_p      = ct$p.value,
       kw_chi2    = if (!is.null(kw)) round(kw$statistic, 2) else NA,
@@ -961,7 +1053,7 @@ if (maxv2_z %in% names(prof_df)) {
                         abs(v2_table$d_P5_vs_P1) > 0.1, ]
     if (nrow(sig_v2) > 0) {
       cat("\n  Biomarkers differentiating fast vs slow agers (pheno_max_v2, |d| > 0.1):\n\n")
-      print(sig_v2[, c("biomarker", "n_total", "rho_z", "d_P5_vs_P1",
+      print(sig_v2[, c("biomarker", "n_total", "n_P1", "n_P5", "rho_z", "d_P5_vs_P1",
                         "mean_P1", "mean_P5", "direction", "kw_padj")],
             row.names = FALSE)
     }
